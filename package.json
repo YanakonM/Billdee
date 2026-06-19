@@ -1,23 +1,32 @@
 {
-  "name": "tex-v2",
+  "name": "billdee",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-sql": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "dexie": "^4.4.3",
     "dexie-react-hooks": "^4.4.0",
     "html2pdf.js": "^0.14.0",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^1.17.0",
+    "pocketbase": "^0.27.0",
     "qrcode.react": "^4.2.0",
     "react-router-dom": "^7.16.0"
   }

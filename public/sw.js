@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tex-v2-cache-v1';
+const CACHE_NAME = 'billdee-cache-v2';
 const urlsToCache = [
   '/',
   '/index.html',

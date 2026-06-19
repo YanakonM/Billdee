@@ -5,17 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="description" content="ระบบออกใบกำกับภาษี / ใบเสร็จรับเงิน พร้อมจัดการลูกค้า สินค้า และสแกนบาร์โค้ด — Tex V2" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="ระบบออกใบกำกับภาษี / ใบเสร็จรับเงิน พร้อมจัดการลูกค้า สินค้า และสแกนบาร์โค้ด — Billdee" />
+    <meta name="theme-color" content="#1e1b3a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>Tex V2 — ระบบใบกำกับภาษี</title>
+    <title>Billdee — ระบบใบกำกับภาษี</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
-      if ('serviceWorker' in navigator) {
+      // Skip the service worker inside the Tauri desktop app (it's already
+      // local — caching there only risks serving stale assets after updates).
+      if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });

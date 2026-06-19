@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useApp } from '../../context/AppContext';
+import { isTauri } from '../../db/sqlStore';
 
 export default function Layout() {
   const { toasts } = useApp();
@@ -10,8 +11,10 @@ export default function Layout() {
   // Single-tab guard: hold a web lock for the app's lifetime. If another tab
   // already holds it, show a blocking warning — two tabs editing the same
   // IndexedDB invites confusion (stale lists, double prints).
+  // Skipped in the Tauri desktop app: SQLite handles concurrent access, and the
+  // app shares localhost with browser tabs during dev (false positives).
   useEffect(() => {
-    if (!navigator.locks) return;
+    if (!navigator.locks || isTauri()) return;
     let releaseLock;
     navigator.locks.request('texv2-app', { ifAvailable: true }, (lock) => {
       if (!lock) {

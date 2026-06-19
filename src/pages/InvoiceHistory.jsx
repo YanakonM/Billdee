@@ -36,7 +36,7 @@ export default function InvoiceHistory() {
 
   async function loadInvoices() {
     const all = await db.invoices.toArray();
-    setInvoices(all.sort((a, b) => (b.id || 0) - (a.id || 0)));
+    setInvoices(all.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
     const printSetting = await db.settings.get('printSettings');
     if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
   }

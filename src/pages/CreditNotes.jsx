@@ -34,7 +34,7 @@ export default function CreditNotes() {
 
   async function loadData() {
     const all = await db.creditNotes.toArray();
-    setNotes(all.sort((a, b) => (b.id || 0) - (a.id || 0)));
+    setNotes(all.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
     setInvoices(await db.invoices.toArray());
     const comp = await db.settings.get('company');
     if (comp) setCompany(comp.value);
@@ -64,7 +64,7 @@ export default function CreditNotes() {
   }
 
   function selectInvoice(invId) {
-    const inv = invoices.find(i => i.id === parseInt(invId));
+    const inv = invoices.find(i => String(i.id) === String(invId));
     setSelectedInvoice(inv || null);
     if (inv) {
       setItems(inv.items?.map(i => ({ ...i, adjusted: false })) || []);

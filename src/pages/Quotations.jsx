@@ -48,7 +48,7 @@ export default function Quotations() {
   }, []);
 
   async function loadData() {
-    setQuotations((await db.quotations.toArray()).sort((a, b) => (b.id || 0) - (a.id || 0)));
+    setQuotations((await db.quotations.toArray()).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
     const comp = await db.settings.get('company');
     if (comp) setCompany(comp.value);
     const inv = await db.settings.get('invoice');

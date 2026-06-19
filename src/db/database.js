@@ -1,8 +1,13 @@
 import Dexie from 'dexie';
+import { pbStore } from './pbStore';
+import { sqlStore, isTauri } from './sqlStore';
+import { storageMode } from './pocketbase';
 
-export const db = new Dexie('TexV2Database');
+// Local IndexedDB store (always defined — used for IndexedDB mode and as the
+// migration source when copying data up to PocketBase).
+export const dexieDb = new Dexie('TexV2Database');
 
-db.version(1).stores({
+dexieDb.version(1).stores({
   customers: '++id, name, shopName, phone, taxId, &code',
   products: '++id, name, barcode, category, &code',
   invoices: '++id, invoiceNumber, customerId, date, status, type',
@@ -10,7 +15,7 @@ db.version(1).stores({
 });
 
 // Version 2: Add quotations, stock tracking
-db.version(2).stores({
+dexieDb.version(2).stores({
   customers: '++id, name, shopName, phone, taxId, &code',
   products: '++id, name, barcode, category, &code, stock',
   invoices: '++id, invoiceNumber, customerId, date, status, type',
@@ -19,6 +24,15 @@ db.version(2).stores({
   stockLogs: '++id, productId, date, type, quantity',
   settings: 'key'
 });
+
+// Active store the whole app talks to:
+//   1. Installed Tauri desktop app  → SQLite file (automatic, no setup)
+//   2. Browser + PocketBase opt-in  → PocketBase server
+//   3. Browser default              → IndexedDB
+// Decided once at load; changing the browser option requires a reload.
+export const db = isTauri()
+  ? sqlStore
+  : (storageMode() === 'pocketbase' ? pbStore : dexieDb);
 
 // Initialize default settings
 export async function initializeSettings() {
@@ -233,7 +247,7 @@ export async function exportBackup() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `tex-v2-backup-${new Date().toISOString().split('T')[0]}.json`;
+  a.download = `billdee-backup-${new Date().toISOString().split('T')[0]}.json`;
   a.click();
   URL.revokeObjectURL(url);
   await db.settings.put({ key: 'lastBackupAt', value: new Date().toISOString() });
@@ -286,7 +300,7 @@ export async function runAutoBackup() {
   if (perm !== 'granted') return false;
 
   const data = await getBackupData();
-  const fileName = `tex-v2-auto-backup-${new Date().toISOString().split('T')[0]}.json`;
+  const fileName = `billdee-auto-backup-${new Date().toISOString().split('T')[0]}.json`;
   const fileHandle = await handle.getFileHandle(fileName, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(JSON.stringify(data, null, 2));

@@ -279,7 +279,7 @@ export default function Customers() {
         {viewingCustomer && (() => {
           const invs = allInvoices
             .filter(inv => (viewingCustomer.id && inv.customerId === viewingCustomer.id) || inv.customerName === viewingCustomer.name)
-            .sort((a, b) => (b.id || 0) - (a.id || 0));
+            .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
           const total = invs.reduce((s, i) => s + (i.grandTotal || 0), 0);
           const unpaid = invs.filter(i => i.status === 'unpaid').reduce((s, i) => s + (i.grandTotal || 0), 0);
           return (

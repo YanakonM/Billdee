@@ -80,8 +80,8 @@ export default function Dashboard() {
 
     // Recent invoices (last 5)
     setRecentInvoices(
-      invoices
-        .sort((a, b) => (b.id || 0) - (a.id || 0))
+      [...invoices]
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
         .slice(0, 5)
     );
 
