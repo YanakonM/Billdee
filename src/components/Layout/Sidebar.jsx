@@ -54,7 +54,7 @@ export default function Sidebar() {
           </div>
           <div>
             <div className="sidebar-logo-text">
-              Tex<span>V2</span>
+              Bill<span>dee</span>
             </div>
             <div style={{ fontSize: '10px', color: 'var(--color-gray-500)', marginTop: '-2px' }}>
               {language === 'th' ? 'ระบบใบกำกับภาษี' : 'Tax Invoice System'}
@@ -92,7 +92,7 @@ export default function Sidebar() {
           borderTop: '1px solid rgba(255,255,255,0.08)',
         }}>
           <div style={{ fontSize: '11px', color: 'var(--color-gray-500)', textAlign: 'center' }}>
-            Tex V2 — Invoice System
+            Billdee — ระบบใบกำกับภาษี
           </div>
         </div>
       </aside>

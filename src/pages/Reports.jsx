@@ -8,36 +8,38 @@ import {
   Calendar, FileSpreadsheet, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 
-// Simple bar chart component (no external library needed)
-function SimpleBarChart({ data, maxValue, color = 'var(--color-primary-500)', height = 200 }) {
+// Simple bar chart component (no external library needed).
+// Bar heights are computed in PIXELS (not %) so they never collapse — a
+// percentage height needs a definite parent height, which is fragile through
+// nested flex containers. Pixels are bulletproof.
+function SimpleBarChart({ data, maxValue, color = '#6366f1', height = 250 }) {
   if (!data.length) return null;
   const max = maxValue || Math.max(...data.map(d => d.value), 1);
-  const barWidth = Math.max(100 / data.length, 2);
+  const labelRowH = 28;                                 // space for x-axis labels
+  const chartH = Math.max(height - labelRowH, 60);      // drawing area (px)
+  const usable = chartH * 0.82;                         // headroom for the value number
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height }}>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: '2px', padding: '0 4px', minHeight: 0 }}>
+    <div style={{ width: '100%' }}>
+      <div style={{ height: chartH, display: 'flex', alignItems: 'flex-end', gap: '2px', padding: '0 4px' }}>
         {data.map((d, i) => {
-          // Cap at 85% so the value label above the tallest bar stays visible.
-          const h = d.value > 0 ? Math.max((d.value / max) * 85, 4) : 0;
+          const barH = d.value > 0 ? Math.max((d.value / max) * usable, 3) : 0;
           return (
             <div key={i} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 }}>
-              <div style={{ fontSize: '10px', color: 'var(--color-gray-500)', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                {d.value > 0 ? formatNumber(d.value, 0) : ''}
-              </div>
+              {d.value > 0 && (
+                <div style={{ fontSize: '10px', color: 'var(--color-gray-500)', marginBottom: '3px', whiteSpace: 'nowrap' }}>
+                  {formatNumber(d.value, 0)}
+                </div>
+              )}
               <div
                 style={{
                   width: '100%',
                   maxWidth: '40px',
-                  height: `${h}%`,
-                  // NOTE: `${color}dd` would be invalid here because `color` is a
-                  // CSS var(), not a hex — appending alpha breaks the whole rule
-                  // and the bar renders invisible. Use a solid valid color.
+                  height: `${barH}px`,
                   background: color,
                   borderRadius: '4px 4px 0 0',
                   transition: 'height 0.5s ease',
                   cursor: 'pointer',
-                  position: 'relative',
                 }}
                 title={`${d.label}: ฿${formatNumber(d.value)}`}
               />
@@ -179,7 +181,7 @@ export default function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tex-v2-report-${dateRange.start}-to-${dateRange.end}.csv`;
+    a.download = `billdee-report-${dateRange.start}-to-${dateRange.end}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('ส่งออก CSV สำเร็จ');
@@ -214,7 +216,7 @@ export default function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tex-v2-report-${dateRange.start}-to-${dateRange.end}.xls`;
+    a.download = `billdee-report-${dateRange.start}-to-${dateRange.end}.xls`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('ส่งออก Excel สำเร็จ');
@@ -318,7 +320,7 @@ export default function Reports() {
               <SimpleBarChart
                 data={dailyData}
                 height={250}
-                color="var(--color-primary-500)"
+                color="#6366f1"
               />
             </div>
           </div>

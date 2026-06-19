@@ -48,7 +48,7 @@ export default function Quotations() {
   }, []);
 
   async function loadData() {
-    setQuotations((await db.quotations.toArray()).sort((a, b) => (b.id || 0) - (a.id || 0)));
+    setQuotations((await db.quotations.toArray()).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
     const comp = await db.settings.get('company');
     if (comp) setCompany(comp.value);
     const inv = await db.settings.get('invoice');
@@ -309,7 +309,7 @@ export default function Quotations() {
 
     printWindow.document.write(`<html><head><title>ใบเสนอราคา ${qt.quotationNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-      <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}table{width:100%;border-collapse:collapse}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
+      <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}table{width:100%;border-collapse:collapse}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
     </head><body>
       <div style="display:flex;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #1e293b">
         <div><div style="font-size:22px;font-weight:800">ใบเสนอราคา</div><div style="font-size:14px;color:#64748b">Quotation</div></div>

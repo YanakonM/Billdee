@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react';
 import Header from '../components/Layout/Header';
-import { db, initializeSettings, exportBackup } from '../db/database';
+import {
+  db, initializeSettings, exportBackup,
+  autoBackupSupported, setAutoBackupDir, clearAutoBackupDir,
+  getAutoBackupStatus, runAutoBackup
+} from '../db/database';
 import { useApp } from '../context/AppContext';
 import {
   Save, Building2, CreditCard, FileText, Upload, Download,
-  RefreshCw, AlertTriangle, Image
+  RefreshCw, AlertTriangle, Image, Database
 } from 'lucide-react';
+import { storageMode, setStorageMode, getPbUrl, setPbUrl, pingPb } from '../db/pocketbase';
+import { isTauri } from '../db/sqlStore';
+import { checkForUpdate, installUpdate } from '../utils/updater';
 
 export default function Settings() {
   const { showToast } = useApp();
@@ -27,6 +34,12 @@ export default function Settings() {
 
   const [activeTab, setActiveTab] = useState('company');
   const [lastBackupAt, setLastBackupAt] = useState(null);
+  const [autoBackup, setAutoBackup] = useState({ configured: false });
+  const [storeMode, setStoreMode] = useState(storageMode());
+  const [pbUrl, setPbUrlState] = useState(getPbUrl());
+  const [pbStatus, setPbStatus] = useState(null); // null | 'checking' | 'ok' | 'fail'
+  const [update, setUpdate] = useState(null); // { available, version, notes, update } | { available:false }
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -43,6 +56,74 @@ export default function Settings() {
     if (invSetting) setInvoice(invSetting.value);
     if (stockSetting) setStock(stockSetting.value);
     setLastBackupAt(backupSetting?.value || null);
+    setAutoBackup(await getAutoBackupStatus());
+  }
+
+  async function handlePickBackupFolder() {
+    try {
+      await setAutoBackupDir();
+      showToast('ตั้งค่าสำรองอัตโนมัติสำเร็จ — สำรองไฟล์แรกแล้ว');
+      loadSettings();
+    } catch (err) {
+      if (err?.name !== 'AbortError') showToast('ตั้งค่าไม่สำเร็จ: ' + err.message, 'error');
+    }
+  }
+
+  async function handleRunAutoBackupNow() {
+    try {
+      const ok = await runAutoBackup();
+      showToast(ok ? 'สำรองข้อมูลลงโฟลเดอร์สำเร็จ' : 'ไม่ได้รับสิทธิ์เข้าถึงโฟลเดอร์', ok ? 'success' : 'error');
+      loadSettings();
+    } catch (err) {
+      showToast('สำรองไม่สำเร็จ: ' + err.message, 'error');
+    }
+  }
+
+  async function handleDisableAutoBackup() {
+    await clearAutoBackupDir();
+    showToast('ปิดการสำรองอัตโนมัติแล้ว');
+    loadSettings();
+  }
+
+  async function handleTestPb() {
+    setPbStatus('checking');
+    setPbUrl(pbUrl);
+    const ok = await pingPb();
+    setPbStatus(ok ? 'ok' : 'fail');
+    showToast(ok ? 'เชื่อมต่อ PocketBase สำเร็จ' : 'เชื่อมต่อไม่ได้ — เช็คว่า server รันอยู่และ URL ถูก', ok ? 'success' : 'error');
+  }
+
+  function handleApplyStorage() {
+    setPbUrl(pbUrl);
+    setStorageMode(storeMode);
+    showToast('บันทึกแล้ว — กำลังรีโหลดเพื่อใช้ที่เก็บข้อมูลใหม่');
+    setTimeout(() => window.location.reload(), 900);
+  }
+
+  async function handleCheckUpdate() {
+    setUpdateBusy(true);
+    try {
+      const res = await checkForUpdate();
+      setUpdate(res);
+      if (res.available) showToast(`มีเวอร์ชันใหม่ ${res.version}`);
+      else if (res.supported) showToast('ใช้เวอร์ชันล่าสุดอยู่แล้ว');
+    } catch (err) {
+      showToast('ตรวจอัปเดตไม่สำเร็จ: ' + err.message, 'error');
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!update?.update) return;
+    setUpdateBusy(true);
+    try {
+      showToast('กำลังดาวน์โหลดและติดตั้ง... แอปจะรีสตาร์ทเอง');
+      await installUpdate(update.update);
+    } catch (err) {
+      showToast('อัปเดตไม่สำเร็จ: ' + err.message, 'error');
+      setUpdateBusy(false);
+    }
   }
 
   async function handleSave() {
@@ -100,6 +181,8 @@ export default function Settings() {
       }
       if (data.settings) {
         for (const s of data.settings) {
+          // Never restore machine-specific folder handles from a backup file.
+          if (s.key === 'autoBackupDir') continue;
           await db.settings.put(s);
         }
       }
@@ -128,6 +211,7 @@ export default function Settings() {
     { id: 'bank', label: 'บัญชีธนาคาร', icon: CreditCard },
     { id: 'invoice', label: 'ใบเสร็จ', icon: FileText },
     { id: 'backup', label: 'สำรอง/กู้คืน', icon: RefreshCw },
+    { id: 'storage', label: 'ที่เก็บข้อมูล', icon: Database },
   ];
 
   return (
@@ -425,6 +509,132 @@ export default function Settings() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Auto-backup to folder */}
+                  <div className="card" style={{ marginTop: '20px', border: '2px solid var(--color-primary-200)' }}>
+                    <div className="card-body">
+                      <h4 style={{ marginBottom: '8px' }}>🔄 สำรองอัตโนมัติลงโฟลเดอร์ (แนะนำ)</h4>
+                      <p style={{ fontSize: '13px', color: 'var(--color-gray-500)', marginBottom: '16px' }}>
+                        เลือกโฟลเดอร์ปลายทางครั้งเดียว (เช่น USB drive หรือโฟลเดอร์ที่ sync กับ Google Drive)
+                        ระบบจะเขียนไฟล์สำรองให้อัตโนมัติวันละครั้งเมื่อเปิดใช้งาน
+                      </p>
+                      {!autoBackupSupported() ? (
+                        <p style={{ fontSize: '13px', color: 'var(--color-warning-600)' }}>
+                          เบราว์เซอร์นี้ไม่รองรับ — กรุณาใช้ Chrome หรือ Edge
+                        </p>
+                      ) : autoBackup.configured ? (
+                        <>
+                          <div style={{ fontSize: '13px', marginBottom: '12px' }}>
+                            <div>📁 โฟลเดอร์: <strong>{autoBackup.folderName}</strong></div>
+                            <div>🕐 สำรองอัตโนมัติล่าสุด: <strong>{autoBackup.lastAutoBackupAt
+                              ? new Date(autoBackup.lastAutoBackupAt).toLocaleString('th-TH')
+                              : 'ยังไม่เคย'}</strong></div>
+                            {autoBackup.permission !== 'granted' && (
+                              <div style={{ color: 'var(--color-warning-600)', marginTop: '4px' }}>
+                                ⚠️ ต้องกดยืนยันสิทธิ์อีกครั้งหลังเปิดเบราว์เซอร์ใหม่ — กด "สำรองเดี๋ยวนี้"
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button className="btn btn-sm btn-primary" onClick={handleRunAutoBackupNow}>
+                              <Download size={16} /> สำรองเดี๋ยวนี้
+                            </button>
+                            <button className="btn btn-sm btn-outline" onClick={handlePickBackupFolder}>
+                              เปลี่ยนโฟลเดอร์
+                            </button>
+                            <button className="btn btn-sm btn-ghost" onClick={handleDisableAutoBackup}>
+                              ปิดการสำรองอัตโนมัติ
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button className="btn btn-primary" onClick={handlePickBackupFolder}>
+                          📁 เลือกโฟลเดอร์สำรองอัตโนมัติ
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'storage' && (
+                <>
+                  <h3 style={{ marginBottom: '8px', fontWeight: 700 }}>ที่เก็บข้อมูล</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--color-gray-500)', marginBottom: '20px' }}>
+                    ค่าเริ่มต้นคือ <strong>ในเครื่อง (IndexedDB)</strong> — เหมาะกับใช้เครื่องเดียว
+                    เปลี่ยนเป็น <strong>PocketBase</strong> เมื่อต้องการให้หลายเครื่องในโรงงานใช้ข้อมูลชุดเดียวกัน
+                    (ต้องมี PocketBase server รันอยู่ — ดูวิธีตั้งใน README-POCKETBASE.md)
+                  </p>
+
+                  <div style={{
+                    padding: '14px 16px', background: 'var(--color-warning-50)',
+                    borderRadius: 'var(--radius-md)', marginBottom: '20px', fontSize: '13px',
+                    display: 'flex', gap: '10px', alignItems: 'flex-start'
+                  }}>
+                    <AlertTriangle size={18} color="var(--color-warning-600)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>ก่อนสลับมา PocketBase: <strong>ส่งออก (Export) ข้อมูลปัจจุบันเก็บไว้ก่อน</strong> แล้วค่อยสลับ →
+                      รีโหลด → เข้ามาที่แท็บสำรอง/กู้คืน กด <strong>นำเข้า (Import)</strong> ไฟล์ที่เพิ่งส่งออก
+                      เพื่อย้ายข้อมูลขึ้น PocketBase</div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">เก็บข้อมูลที่</label>
+                    <select className="form-select" value={storeMode}
+                      onChange={e => setStoreMode(e.target.value)} style={{ maxWidth: '360px' }}>
+                      <option value="indexeddb">ในเครื่อง — IndexedDB (ค่าเริ่มต้น)</option>
+                      <option value="pocketbase">PocketBase server</option>
+                    </select>
+                  </div>
+
+                  {storeMode === 'pocketbase' && (
+                    <div className="form-group">
+                      <label className="form-label">PocketBase URL</label>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <input type="text" className="form-input" value={pbUrl}
+                          onChange={e => { setPbUrlState(e.target.value); setPbStatus(null); }}
+                          placeholder="http://127.0.0.1:8090" style={{ maxWidth: '360px' }} />
+                        <button className="btn btn-outline" onClick={handleTestPb}>ทดสอบการเชื่อมต่อ</button>
+                      </div>
+                      <p className="form-help">
+                        {pbStatus === 'checking' && 'กำลังเชื่อมต่อ...'}
+                        {pbStatus === 'ok' && '✅ เชื่อมต่อได้'}
+                        {pbStatus === 'fail' && '❌ เชื่อมต่อไม่ได้ — เช็คว่า server รันอยู่และ URL ถูก'}
+                        {pbStatus === null && 'เครื่องลูกในโรงงานให้ใส่ IP ของเครื่องแม่ เช่น http://192.168.1.50:8090'}
+                      </p>
+                    </div>
+                  )}
+
+                  <button className="btn btn-primary" onClick={handleApplyStorage} style={{ marginTop: '8px' }}>
+                    <Save size={18} /> บันทึกและรีโหลด
+                  </button>
+
+                  {isTauri() && (
+                    <div className="card" style={{ marginTop: '28px', border: '1px solid var(--color-primary-200)' }}>
+                      <div className="card-body">
+                        <h4 style={{ marginBottom: '8px' }}>⬆️ อัปเดตโปรแกรม</h4>
+                        <p style={{ fontSize: '13px', color: 'var(--color-gray-500)', marginBottom: '16px' }}>
+                          ตรวจหาเวอร์ชันใหม่จาก GitHub แล้วกดอัปเดตได้ในแอปเลย — โปรแกรมจะดาวน์โหลด ติดตั้ง และรีสตาร์ทให้อัตโนมัติ (ข้อมูลไม่หาย)
+                        </p>
+                        {update?.available ? (
+                          <div>
+                            <div style={{ fontSize: '14px', marginBottom: '12px' }}>
+                              🎉 มีเวอร์ชันใหม่: <strong>{update.version}</strong>
+                              {update.notes && (
+                                <div style={{ fontSize: '12px', color: 'var(--color-gray-500)', marginTop: '4px', whiteSpace: 'pre-wrap' }}>{update.notes}</div>
+                              )}
+                            </div>
+                            <button className="btn btn-primary" onClick={handleInstallUpdate} disabled={updateBusy}>
+                              <Download size={18} /> {updateBusy ? 'กำลังอัปเดต...' : 'อัปเดตเดี๋ยวนี้'}
+                            </button>
+                          </div>
+                        ) : (
+                          <button className="btn btn-outline" onClick={handleCheckUpdate} disabled={updateBusy}>
+                            <RefreshCw size={18} /> {updateBusy ? 'กำลังตรวจสอบ...' : 'ตรวจหาอัปเดต'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>

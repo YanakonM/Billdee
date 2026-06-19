@@ -10,7 +10,7 @@ import { generatePromptPayPayload } from '../utils/promptpay';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
-  Printer, FileDown, Eye, X, Camera, UserPlus, Share2, Receipt
+  Printer, FileDown, Eye, X, Camera, UserPlus, Share2
 } from 'lucide-react';
 
 export default function CreateInvoice() {
@@ -61,6 +61,9 @@ export default function CreateInvoice() {
   // Preview
   const [showPreview, setShowPreview] = useState(false);
 
+  // Paper size for printing (remembered across sessions)
+  const [paperSize, setPaperSize] = useState('A4');
+
   // Prepared by
   const [preparedBy, setPreparedBy] = useState('');
 
@@ -94,6 +97,9 @@ export default function CreateInvoice() {
     if (bankSetting) setBank(bankSetting.value);
     if (invSetting) setInvoiceSettings(invSetting.value);
     if (lastPrepared) setPreparedBy(lastPrepared.value);
+
+    const printSetting = await db.settings.get('printSettings');
+    if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
 
     const nextNum = await getNextInvoiceNumber();
     setInvoiceNumber(nextNum);
@@ -417,7 +423,9 @@ export default function CreateInvoice() {
   }
 
   // Thermal print (58mm/80mm receipt)
-  function handleThermalPrint() {
+  function handleThermalPrint(widthMm = 80) {
+    const w = widthMm === 58 ? 58 : 80;
+    const base = w === 58 ? 10 : 12; // 58mm rolls are tight → smaller base font
     const printWindow = window.open('', '_blank');
     const filteredItems = items.filter(i => i.description);
     const itemLines = filteredItems.map((item, idx) => `
@@ -434,10 +442,10 @@ export default function CreateInvoice() {
       <html><head><title>Thermal ${invoiceNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
       <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Sarabun',sans-serif;width:80mm;padding:4mm;font-size:12px;color:#000}
+        *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        body{font-family:'Sarabun',sans-serif;width:${w}mm;padding:4mm;font-size:${base}px;color:#000}
         .divider{border-top:1px dashed #333;margin:6px 0}
-        @media print{@page{size:80mm auto;margin:0}body{padding:2mm}}
+        @media print{@page{size:${w}mm auto;margin:0}body{padding:2mm}}
       </style></head><body>
         <div style="text-align:center;font-weight:700;font-size:14px">${company.name || ''}</div>
         <div style="text-align:center;font-size:10px;color:#666">${company.address || ''}</div>
@@ -477,25 +485,30 @@ export default function CreateInvoice() {
     setTimeout(() => printWindow.print(), 500);
   }
 
-  // Print
-  function handlePrint() {
+  // Full-document print (A4 / A5 / Letter) — uses the rendered preview layout.
+  function handleFullPrint(size = 'A4') {
     const content = printRef.current;
     if (!content) return;
+    const cfg = {
+      A4: { page: 'A4', margin: '10mm', font: '13px' },
+      A5: { page: 'A5', margin: '8mm', font: '11px' },
+      Letter: { page: 'Letter', margin: '10mm', font: '13px' },
+    }[size] || { page: 'A4', margin: '10mm', font: '13px' };
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html>
         <head>
-          <title>ใบเสร็จ ${invoiceNumber}</title>
+          <title>${invoiceNumber}</title>
           <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Sarabun', sans-serif; padding: 10mm; color: #1e293b; font-size: 13px; }
+            * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body { font-family: 'Sarabun', sans-serif; padding: ${cfg.margin}; color: #1e293b; font-size: ${cfg.font}; }
             table { width: 100%; border-collapse: collapse; }
             th, td { padding: 8px 10px; }
             .text-right { text-align: right; }
             .text-center { text-align: center; }
             .bold { font-weight: 700; }
-            @media print { @page { size: A4; margin: 10mm; } }
+            @media print { @page { size: ${cfg.page}; margin: ${cfg.margin}; } body { padding: 0; } }
           </style>
         </head>
         <body>${content.innerHTML}</body>
@@ -505,18 +518,45 @@ export default function CreateInvoice() {
     setTimeout(() => { printWindow.print(); }, 500);
   }
 
+  // Route to the right printer based on the chosen paper size.
+  function doPrint(size = paperSize) {
+    if (size === '80mm') return handleThermalPrint(80);
+    if (size === '58mm') return handleThermalPrint(58);
+    return handleFullPrint(size);
+  }
+
+  // Remember the paper-size choice across sessions.
+  async function changePaperSize(size) {
+    setPaperSize(size);
+    const cur = (await db.settings.get('printSettings'))?.value || {};
+    await db.settings.put({ key: 'printSettings', value: { ...cur, paperSize: size } });
+  }
+
   return (
     <>
       <Header
         title={editingId ? 'แก้ไขใบเสร็จ' : 'สร้างใบเสร็จ'}
         subtitle={invoiceNumber}
         actions={
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              className="form-select"
+              value={paperSize}
+              onChange={e => changePaperSize(e.target.value)}
+              title="ขนาดกระดาษสำหรับพิมพ์"
+              style={{ width: 'auto', padding: '6px 28px 6px 10px', fontSize: '13px' }}
+            >
+              <option value="A4">A4</option>
+              <option value="A5">A5</option>
+              <option value="Letter">Letter</option>
+              <option value="80mm">ใบเสร็จย่อ 80mm</option>
+              <option value="58mm">ใบเสร็จย่อ 58mm</option>
+            </select>
             <button className="btn btn-outline btn-sm" onClick={() => setShowPreview(true)}>
               <Eye size={16} /> ดูตัวอย่าง
             </button>
-            <button className="btn btn-outline btn-sm" onClick={handleThermalPrint} title="พิมพ์ใบเสร็จย่อ 80mm">
-              <Receipt size={16} /> ใบเสร็จย่อ
+            <button className="btn btn-outline btn-sm" onClick={() => doPrint()} title="พิมพ์ตามขนาดที่เลือก">
+              <Printer size={16} /> พิมพ์
             </button>
             <button className="btn btn-outline btn-sm" onClick={handleShare}>
               <Share2 size={16} /> แชร์
@@ -915,8 +955,20 @@ export default function CreateInvoice() {
         footer={
           <>
             <button className="btn btn-outline" onClick={() => setShowPreview(false)}>ปิด</button>
-            <button className="btn btn-accent" onClick={handlePrint}>
-              <Printer size={18} /> พิมพ์
+            <select
+              className="form-select"
+              value={paperSize}
+              onChange={e => changePaperSize(e.target.value)}
+              style={{ width: 'auto', padding: '8px 28px 8px 12px' }}
+            >
+              <option value="A4">A4</option>
+              <option value="A5">A5</option>
+              <option value="Letter">Letter</option>
+              <option value="80mm">ใบเสร็จย่อ 80mm</option>
+              <option value="58mm">ใบเสร็จย่อ 58mm</option>
+            </select>
+            <button className="btn btn-accent" onClick={() => doPrint()}>
+              <Printer size={18} /> พิมพ์ ({paperSize})
             </button>
           </>
         }

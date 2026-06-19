@@ -1,6 +1,11 @@
 # IDE / Agent settings
 .claude
 
+# Tauri updater signing keys — NEVER commit the private key
+*.key
+*.key.pub
+.tauri/
+
 # Logs
 logs
 *.log
