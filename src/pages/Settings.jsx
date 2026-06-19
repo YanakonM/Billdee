@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import Header from '../components/Layout/Header';
-import { db, initializeSettings, exportBackup } from '../db/database';
+import {
+  db, initializeSettings, exportBackup,
+  autoBackupSupported, setAutoBackupDir, clearAutoBackupDir,
+  getAutoBackupStatus, runAutoBackup
+} from '../db/database';
 import { useApp } from '../context/AppContext';
 import {
   Save, Building2, CreditCard, FileText, Upload, Download,
@@ -27,6 +31,7 @@ export default function Settings() {
 
   const [activeTab, setActiveTab] = useState('company');
   const [lastBackupAt, setLastBackupAt] = useState(null);
+  const [autoBackup, setAutoBackup] = useState({ configured: false });
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -43,6 +48,33 @@ export default function Settings() {
     if (invSetting) setInvoice(invSetting.value);
     if (stockSetting) setStock(stockSetting.value);
     setLastBackupAt(backupSetting?.value || null);
+    setAutoBackup(await getAutoBackupStatus());
+  }
+
+  async function handlePickBackupFolder() {
+    try {
+      await setAutoBackupDir();
+      showToast('ตั้งค่าสำรองอัตโนมัติสำเร็จ — สำรองไฟล์แรกแล้ว');
+      loadSettings();
+    } catch (err) {
+      if (err?.name !== 'AbortError') showToast('ตั้งค่าไม่สำเร็จ: ' + err.message, 'error');
+    }
+  }
+
+  async function handleRunAutoBackupNow() {
+    try {
+      const ok = await runAutoBackup();
+      showToast(ok ? 'สำรองข้อมูลลงโฟลเดอร์สำเร็จ' : 'ไม่ได้รับสิทธิ์เข้าถึงโฟลเดอร์', ok ? 'success' : 'error');
+      loadSettings();
+    } catch (err) {
+      showToast('สำรองไม่สำเร็จ: ' + err.message, 'error');
+    }
+  }
+
+  async function handleDisableAutoBackup() {
+    await clearAutoBackupDir();
+    showToast('ปิดการสำรองอัตโนมัติแล้ว');
+    loadSettings();
   }
 
   async function handleSave() {
@@ -100,6 +132,8 @@ export default function Settings() {
       }
       if (data.settings) {
         for (const s of data.settings) {
+          // Never restore machine-specific folder handles from a backup file.
+          if (s.key === 'autoBackupDir') continue;
           await db.settings.put(s);
         }
       }
@@ -423,6 +457,51 @@ export default function Settings() {
                           <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
                         </label>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Auto-backup to folder */}
+                  <div className="card" style={{ marginTop: '20px', border: '2px solid var(--color-primary-200)' }}>
+                    <div className="card-body">
+                      <h4 style={{ marginBottom: '8px' }}>🔄 สำรองอัตโนมัติลงโฟลเดอร์ (แนะนำ)</h4>
+                      <p style={{ fontSize: '13px', color: 'var(--color-gray-500)', marginBottom: '16px' }}>
+                        เลือกโฟลเดอร์ปลายทางครั้งเดียว (เช่น USB drive หรือโฟลเดอร์ที่ sync กับ Google Drive)
+                        ระบบจะเขียนไฟล์สำรองให้อัตโนมัติวันละครั้งเมื่อเปิดใช้งาน
+                      </p>
+                      {!autoBackupSupported() ? (
+                        <p style={{ fontSize: '13px', color: 'var(--color-warning-600)' }}>
+                          เบราว์เซอร์นี้ไม่รองรับ — กรุณาใช้ Chrome หรือ Edge
+                        </p>
+                      ) : autoBackup.configured ? (
+                        <>
+                          <div style={{ fontSize: '13px', marginBottom: '12px' }}>
+                            <div>📁 โฟลเดอร์: <strong>{autoBackup.folderName}</strong></div>
+                            <div>🕐 สำรองอัตโนมัติล่าสุด: <strong>{autoBackup.lastAutoBackupAt
+                              ? new Date(autoBackup.lastAutoBackupAt).toLocaleString('th-TH')
+                              : 'ยังไม่เคย'}</strong></div>
+                            {autoBackup.permission !== 'granted' && (
+                              <div style={{ color: 'var(--color-warning-600)', marginTop: '4px' }}>
+                                ⚠️ ต้องกดยืนยันสิทธิ์อีกครั้งหลังเปิดเบราว์เซอร์ใหม่ — กด "สำรองเดี๋ยวนี้"
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button className="btn btn-sm btn-primary" onClick={handleRunAutoBackupNow}>
+                              <Download size={16} /> สำรองเดี๋ยวนี้
+                            </button>
+                            <button className="btn btn-sm btn-outline" onClick={handlePickBackupFolder}>
+                              เปลี่ยนโฟลเดอร์
+                            </button>
+                            <button className="btn btn-sm btn-ghost" onClick={handleDisableAutoBackup}>
+                              ปิดการสำรองอัตโนมัติ
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button className="btn btn-primary" onClick={handlePickBackupFolder}>
+                          📁 เลือกโฟลเดอร์สำรองอัตโนมัติ
+                        </button>
+                      )}
                     </div>
                   </div>
                 </>

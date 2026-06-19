@@ -19,6 +19,7 @@ export default function InvoiceHistory() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [paperSize, setPaperSize] = useState('A4');
 
   useEffect(() => { loadInvoices(); }, []);
 
@@ -36,6 +37,56 @@ export default function InvoiceHistory() {
   async function loadInvoices() {
     const all = await db.invoices.toArray();
     setInvoices(all.sort((a, b) => (b.id || 0) - (a.id || 0)));
+    const printSetting = await db.settings.get('printSettings');
+    if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
+  }
+
+  async function changePaperSize(size) {
+    setPaperSize(size);
+    const cur = (await db.settings.get('printSettings'))?.value || {};
+    await db.settings.put({ key: 'printSettings', value: { ...cur, paperSize: size } });
+  }
+
+  // Thermal (80/58mm) reprint of a saved invoice.
+  function printThermal(target, w) {
+    const width = w === 58 ? 58 : 80;
+    const base = width === 58 ? 10 : 12;
+    const company = target.company || {};
+    const items = target.items || [];
+    const title = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
+    const itemLines = items.map((item, idx) => `
+      <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${item.description}</span><span>${formatNumber(item.total)}</span></div>
+      <div style="font-size:10px;color:#666;padding-left:16px">${item.quantity} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
+    `).join('');
+    const pw = window.open('', '_blank');
+    pw.document.write(`
+      <html><head><title>${target.invoiceNumber}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+      <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;width:${width}mm;padding:4mm;font-size:${base}px;color:#000}.divider{border-top:1px dashed #333;margin:6px 0}@media print{@page{size:${width}mm auto;margin:0}body{padding:2mm}}</style>
+      </head><body>
+        <div style="text-align:center;font-weight:700;font-size:14px">${company.name || ''}</div>
+        <div style="text-align:center;font-size:10px;color:#666">${company.address || ''}</div>
+        <div style="text-align:center;font-size:10px">Tel: ${company.phone || ''}</div>
+        <div class="divider"></div>
+        <div style="text-align:center;font-weight:700">${title}</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>เลขที่: ${target.invoiceNumber}</span><span>${formatDateThai(target.date)}</span></div>
+        <div style="font-size:11px">ลูกค้า: ${target.customerName || '-'}</div>
+        <div class="divider"></div>
+        ${itemLines}
+        <div class="divider"></div>
+        <div style="display:flex;justify-content:space-between;font-weight:600"><span>รวม:</span><span>${formatNumber(target.subtotal)}</span></div>
+        ${target.billDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>ส่วนลดท้ายบิล:</span><span>-${formatNumber(target.billDiscount)}</span></div>` : ''}
+        ${target.type === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>VAT ${target.vatRate}%:</span><span>${formatNumber(target.vatAmount)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;border-top:2px solid #000;margin-top:4px;padding-top:4px"><span>รวมทั้งสิ้น:</span><span>${formatNumber(target.grandTotal)} บาท</span></div>
+        ${target.whtEnabled ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>หัก ณ ที่จ่าย ${target.whtRate}%:</span><span>-${formatNumber(target.whtAmount)}</span></div><div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;border-top:1px solid #000;margin-top:2px;padding-top:2px"><span>ชำระสุทธิ:</span><span>${formatNumber(target.netPayable)} บาท</span></div>` : ''}
+        <div style="font-size:10px;text-align:center;color:#666">(${bahtText(target.whtEnabled ? target.netPayable : target.grandTotal)})</div>
+        ${target.paymentMethod === 'cash' && target.cashReceived > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>รับเงิน:</span><span>${formatNumber(target.cashReceived)}</span></div><div style="display:flex;justify-content:space-between;font-size:11px"><span>เงินทอน:</span><span>${formatNumber(target.changeDue)}</span></div>` : ''}
+        <div class="divider"></div>
+        <div style="text-align:center;font-size:10px;color:#666">ขอบคุณที่ใช้บริการ</div>
+      </body></html>
+    `);
+    pw.document.close();
+    setTimeout(() => pw.print(), 500);
   }
 
   const filtered = invoices.filter(inv => {
@@ -68,9 +119,16 @@ export default function InvoiceHistory() {
     setShowPreview(true);
   }
 
-  function handlePrint(inv) {
+  function handlePrint(inv, size = paperSize) {
     const target = inv || selectedInvoice;
     if (!target) return;
+    if (size === '80mm' || size === '58mm') return printThermal(target, size === '58mm' ? 58 : 80);
+
+    const cfg = {
+      A4: { page: 'A4', margin: '10mm', font: '13px' },
+      A5: { page: 'A5', margin: '8mm', font: '11px' },
+      Letter: { page: 'Letter', margin: '10mm', font: '13px' },
+    }[size] || { page: 'A4', margin: '10mm', font: '13px' };
 
     const printWindow = window.open('', '_blank');
     const items = target.items || [];
@@ -108,10 +166,10 @@ export default function InvoiceHistory() {
           <title>${docTitle} ${target.invoiceNumber}</title>
           <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
           <style>
-            * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family:'Sarabun',sans-serif; padding:15mm; color:#1e293b; font-size:13px; line-height:1.6; }
+            * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:#1e293b; font-size:${cfg.font}; line-height:1.6; }
             table { width:100%; border-collapse:collapse; }
-            @media print { @page { size:A4; margin:10mm; } body { padding:0; } }
+            @media print { @page { size:${cfg.page}; margin:${cfg.margin}; } body { padding:0; } }
           </style>
         </head>
         <body>
@@ -374,8 +432,20 @@ export default function InvoiceHistory() {
           footer={
             <>
               <button className="btn btn-outline" onClick={() => { setShowPreview(false); setSelectedInvoice(null); }}>ปิด</button>
+              <select
+                className="form-select"
+                value={paperSize}
+                onChange={e => changePaperSize(e.target.value)}
+                style={{ width: 'auto', padding: '8px 28px 8px 12px' }}
+              >
+                <option value="A4">A4</option>
+                <option value="A5">A5</option>
+                <option value="Letter">Letter</option>
+                <option value="80mm">ใบเสร็จย่อ 80mm</option>
+                <option value="58mm">ใบเสร็จย่อ 58mm</option>
+              </select>
               <button className="btn btn-accent" onClick={() => handlePrint()}>
-                <Printer size={18} /> พิมพ์
+                <Printer size={18} /> พิมพ์ ({paperSize})
               </button>
             </>
           }

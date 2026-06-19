@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
-import { db, exportBackup } from '../db/database';
+import { db, exportBackup, autoBackupIfDue, runAutoBackup } from '../db/database';
 import { formatNumber, formatCurrency, formatDateShort } from '../utils/helpers';
 import {
   FileText, Users, Package, FilePlus, TrendingUp,
@@ -27,10 +27,27 @@ export default function Dashboard() {
   const [lowStockProducts, setLowStockProducts] = useState([]);
   const [backupReminder, setBackupReminder] = useState(null); // { days, lastAt } when a backup is due
   const [backingUp, setBackingUp] = useState(false);
+  const [needsBackupPermission, setNeedsBackupPermission] = useState(false);
 
   useEffect(() => {
     loadDashboard();
+    // Run the daily auto-backup silently; surface a banner only when the
+    // browser requires a fresh permission click after a restart.
+    autoBackupIfDue().then(result => {
+      setNeedsBackupPermission(result === 'needs-permission');
+      if (result === 'done') loadDashboard(); // refresh the reminder state
+    }).catch(() => {});
   }, []);
+
+  async function handleGrantBackupPermission() {
+    try {
+      const ok = await runAutoBackup(); // user gesture → can re-request permission
+      if (ok) {
+        setNeedsBackupPermission(false);
+        loadDashboard();
+      }
+    } catch { /* user dismissed the permission prompt — keep the banner */ }
+  }
 
   async function loadDashboard() {
     const today = new Date().toISOString().split('T')[0];
@@ -131,6 +148,27 @@ export default function Dashboard() {
         }
       />
       <div className="page-content">
+        {/* Auto-backup needs a permission click after browser restart */}
+        {needsBackupPermission && (
+          <div className="card" style={{
+            borderLeft: '4px solid var(--color-primary-500)',
+            marginBottom: '20px', background: 'var(--color-primary-50)'
+          }}>
+            <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <ShieldCheck size={28} color="var(--color-primary-600)" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: '220px', fontSize: '14px' }}>
+                <strong>สำรองอัตโนมัติรอการยืนยัน</strong>
+                <div style={{ fontSize: '13px', color: 'var(--color-gray-600)', marginTop: '2px' }}>
+                  เบราว์เซอร์ขอให้ยืนยันสิทธิ์เข้าถึงโฟลเดอร์สำรองอีกครั้ง (เกิดขึ้นหลังเปิดเบราว์เซอร์ใหม่)
+                </div>
+              </div>
+              <button className="btn btn-primary" onClick={handleGrantBackupPermission}>
+                ยืนยันและสำรองเลย
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Backup reminder */}
         {backupReminder && (
           <div className="card" style={{

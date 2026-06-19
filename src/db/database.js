@@ -218,7 +218,9 @@ export async function getBackupData() {
     quotations: await db.quotations.toArray(),
     creditNotes: await db.creditNotes.toArray(),
     stockLogs: await db.stockLogs.toArray(),
-    settings: await db.settings.toArray(),
+    // autoBackupDir holds a FileSystemDirectoryHandle — not JSON-serializable
+    // and machine-specific, so it must never travel inside a backup file.
+    settings: (await db.settings.toArray()).filter(s => s.key !== 'autoBackupDir'),
     exportDate: new Date().toISOString(),
     version: '2.1',
   };
@@ -235,6 +237,84 @@ export async function exportBackup() {
   a.click();
   URL.revokeObjectURL(url);
   await db.settings.put({ key: 'lastBackupAt', value: new Date().toISOString() });
+}
+
+// ============================================================
+// Auto-backup to a local folder (File System Access API).
+// The user picks a target folder once (e.g. a USB drive or a
+// cloud-synced folder); the directory handle is stored in
+// IndexedDB and a backup file is written automatically ~daily.
+// Chrome/Edge only — window.showDirectoryPicker is the gate.
+// ============================================================
+
+export function autoBackupSupported() {
+  return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+}
+
+// Let the user pick the backup folder, save the handle, and back up now.
+export async function setAutoBackupDir() {
+  const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  await db.settings.put({ key: 'autoBackupDir', value: handle });
+  await runAutoBackup();
+  return handle;
+}
+
+export async function clearAutoBackupDir() {
+  await db.settings.delete('autoBackupDir');
+}
+
+export async function getAutoBackupStatus() {
+  const rec = await db.settings.get('autoBackupDir');
+  if (!rec?.value) return { configured: false };
+  let permission = 'prompt';
+  try { permission = await rec.value.queryPermission({ mode: 'readwrite' }); } catch {}
+  const last = (await db.settings.get('lastAutoBackupAt'))?.value || null;
+  return { configured: true, permission, lastAutoBackupAt: last, folderName: rec.value.name };
+}
+
+// Write a backup file into the chosen folder. Must be called from a user
+// gesture when permission is 'prompt' (requestPermission requires one).
+export async function runAutoBackup() {
+  const rec = await db.settings.get('autoBackupDir');
+  if (!rec?.value) return false;
+  const handle = rec.value;
+  let perm = 'prompt';
+  try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch {}
+  if (perm !== 'granted') {
+    try { perm = await handle.requestPermission({ mode: 'readwrite' }); } catch { return false; }
+  }
+  if (perm !== 'granted') return false;
+
+  const data = await getBackupData();
+  const fileName = `tex-v2-auto-backup-${new Date().toISOString().split('T')[0]}.json`;
+  const fileHandle = await handle.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(data, null, 2));
+  await writable.close();
+
+  const now = new Date().toISOString();
+  await db.settings.put({ key: 'lastAutoBackupAt', value: now });
+  // Also satisfies the dashboard "please back up" reminder.
+  await db.settings.put({ key: 'lastBackupAt', value: now });
+  return true;
+}
+
+// Called on app load: back up silently if a folder is set, permission is
+// already granted, and the last auto-backup is older than ~20 hours.
+export async function autoBackupIfDue() {
+  const rec = await db.settings.get('autoBackupDir');
+  if (!rec?.value) return 'not-configured';
+  const last = (await db.settings.get('lastAutoBackupAt'))?.value;
+  const due = !last || (Date.now() - new Date(last).getTime()) > 20 * 60 * 60 * 1000;
+  if (!due) return 'not-due';
+  let perm = 'prompt';
+  try { perm = await rec.value.queryPermission({ mode: 'readwrite' }); } catch {}
+  if (perm !== 'granted') return 'needs-permission';
+  try {
+    return (await runAutoBackup()) ? 'done' : 'error';
+  } catch {
+    return 'error';
+  }
 }
 
 export default db;

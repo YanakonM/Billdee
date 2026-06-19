@@ -16,6 +16,13 @@ import { initializeSettings } from './db/database';
 function AppInitializer({ children }) {
   useEffect(() => {
     initializeSettings();
+    // Ask the browser to mark our storage as persistent so IndexedDB is never
+    // auto-evicted under disk pressure — critical for a production machine.
+    if (navigator.storage?.persist) {
+      navigator.storage.persisted().then(persisted => {
+        if (!persisted) navigator.storage.persist();
+      }).catch(() => {});
+    }
   }, []);
   return children;
 }
