@@ -6,7 +6,7 @@
 
 ## A. โค้ดอยู่บน GitHub แล้ว
 
-Repo: **https://github.com/YanakonM/Tex** — โค้ดทั้งหมด (รวม Billdee + Tauri) push ขึ้นแล้ว
+Repo: **https://github.com/YanakonM/Billdee** — โค้ดทั้งหมด (รวม Billdee + Tauri) push ขึ้นแล้ว
 อัปเดตโค้ดครั้งต่อไป: `git add -A && git commit -m "..." && git push`
 
 ---

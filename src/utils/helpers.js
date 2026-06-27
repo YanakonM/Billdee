@@ -89,6 +89,16 @@ export function formatCurrency(num) {
   return `฿${formatNumber(num)}`;
 }
 
+// Validate a Thai 13-digit Tax ID using the official check-digit algorithm.
+export function isValidThaiTaxId(id) {
+  const s = (id ?? '').toString().replace(/\D/g, '');
+  if (s.length !== 13) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += parseInt(s[i], 10) * (13 - i);
+  const check = (11 - (sum % 11)) % 10;
+  return check === parseInt(s[12], 10);
+}
+
 // Thai tax-invoice branch label from a 5-digit branch code.
 // '00000' (or empty) = head office; anything else = a numbered branch.
 export function formatBranch(code) {

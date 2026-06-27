@@ -3,9 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import Modal from '../components/Common/Modal';
-import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock } from '../db/database';
+import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch } from '../utils/helpers';
+import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId } from '../utils/helpers';
 import { generatePromptPayPayload } from '../utils/promptpay';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -293,6 +293,23 @@ export default function CreateInvoice() {
       return;
     }
 
+    // Full tax invoices must be complete & valid (Revenue Dept. ม.86/4).
+    if (docType === 'tax_invoice') {
+      if (!isValidThaiTaxId(company.taxId)) {
+        showToast('ออกใบกำกับภาษีไม่ได้: กรุณากรอกเลขผู้เสียภาษีของบริษัทให้ถูกต้อง (ตั้งค่า → ข้อมูลบริษัท)', 'error');
+        return;
+      }
+      const buyerTaxId = selectedCustomer?.taxId || '';
+      if (!isValidThaiTaxId(buyerTaxId)) {
+        showToast('ออกใบกำกับภาษีไม่ได้: เลขผู้เสียภาษีของลูกค้าไม่ถูกต้อง/ไม่ครบ 13 หลัก', 'error');
+        return;
+      }
+      if (!(selectedCustomer?.address || '').trim()) {
+        showToast('ออกใบกำกับภาษีไม่ได้: ต้องมีที่อยู่ของลูกค้า', 'error');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       // Save prepared by name for next time
@@ -301,20 +318,13 @@ export default function CreateInvoice() {
       const deductions = items.filter(i => i.productId);
       let finalNumber = invoiceNumber;
 
-      // Reserve the running number, write the invoice, and adjust stock in a
-      // single transaction so two tabs can never produce a duplicate number.
-      await db.transaction('rw', db.invoices, db.settings, db.products, db.stockLogs, async () => {
-        if (!editingId && !numberEdited) {
-          const setting = await db.settings.get('invoice');
-          const v = setting.value;
-          const isDelivery = docType === 'delivery';
-          const key = isDelivery ? 'nextDeliveryNoteNumber' : 'nextNumber';
-          const prefix = isDelivery ? (v.deliveryNotePrefix || 'DO') : (v.prefix || 'INV');
-          finalNumber = `${prefix}-${String(v[key] || 1).padStart(6, '0')}`;
-          v[key] = (v[key] || 1) + 1;
-          await db.settings.put({ key: 'invoice', value: v });
-        }
+      // Reserve the running number atomically (locked) BEFORE writing the record.
+      if (!editingId && !numberEdited) {
+        finalNumber = await reserveDocumentNumber(docType === 'delivery' ? 'delivery' : 'invoice');
+      }
 
+      // Write the invoice + adjust stock together.
+      await db.transaction('rw', db.invoices, db.settings, db.products, db.stockLogs, async () => {
         const invoiceData = {
           invoiceNumber: finalNumber,
           date: invoiceDate,
@@ -489,6 +499,11 @@ export default function CreateInvoice() {
   function handleFullPrint(size = 'A4') {
     const content = printRef.current;
     if (!content) return;
+    // Tax invoices are printed as two pages: ต้นฉบับ (for the buyer) + สำเนา (seller's copy).
+    const inner = content.innerHTML;
+    const bodyHtml = docType === 'tax_invoice'
+      ? `${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}`
+      : inner;
     const cfg = {
       A4: { page: 'A4', margin: '10mm', font: '13px' },
       A5: { page: 'A5', margin: '8mm', font: '11px' },
@@ -511,7 +526,7 @@ export default function CreateInvoice() {
             @media print { @page { size: ${cfg.page}; margin: ${cfg.margin}; } body { padding: 0; } }
           </style>
         </head>
-        <body>${content.innerHTML}</body>
+        <body>${bodyHtml}</body>
       </html>
     `);
     printWindow.document.close();

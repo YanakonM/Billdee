@@ -145,44 +145,46 @@ export default function Settings() {
     showToast('ส่งออกข้อมูลสำเร็จ');
   }
 
-  // Import data from JSON
+  // Import data from JSON — validates the file and snapshots current data first.
   async function handleImport(event) {
     const file = event.target.files[0];
     if (!file) return;
-    if (!window.confirm('การนำเข้าจะเขียนทับข้อมูลเดิม ต้องการดำเนินการต่อหรือไม่?')) return;
+
+    // 1) Parse + validate BEFORE touching anything (a bad file must not wipe data).
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch {
+      showToast('ไฟล์เสียหาย — อ่าน JSON ไม่ได้ ไม่มีการเปลี่ยนแปลงข้อมูล', 'error');
+      event.target.value = '';
+      return;
+    }
+    const TABLES = ['customers', 'products', 'invoices', 'quotations', 'creditNotes', 'stockLogs'];
+    const present = TABLES.filter(t => Array.isArray(data?.[t]));
+    if (!data || typeof data !== 'object' || (present.length === 0 && !Array.isArray(data.settings))) {
+      showToast('ไฟล์นี้ไม่ใช่ไฟล์สำรองของ Billdee — ไม่มีการเปลี่ยนแปลงข้อมูล', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    if (!window.confirm('การนำเข้าจะเขียนทับข้อมูลเดิมทั้งหมด\nระบบจะ "สำรองข้อมูลปัจจุบันเป็นไฟล์" ให้ก่อนเพื่อความปลอดภัย แล้วจึงนำเข้า\nต้องการดำเนินการต่อหรือไม่?')) {
+      event.target.value = '';
+      return;
+    }
 
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
+      // 2) Safety snapshot of current data before overwriting.
+      try { await exportBackup(); } catch { /* non-fatal */ }
 
-      if (data.customers) {
-        await db.customers.clear();
-        await db.customers.bulkAdd(data.customers.map(c => { const { id, ...rest } = c; return rest; }));
+      // 3) Restore only fields that are valid arrays.
+      const strip = (rows) => rows.map(r => { const { id, ...rest } = r; return rest; });
+      for (const t of present) {
+        await db[t].clear();
+        await db[t].bulkAdd(strip(data[t]));
       }
-      if (data.products) {
-        await db.products.clear();
-        await db.products.bulkAdd(data.products.map(p => { const { id, ...rest } = p; return rest; }));
-      }
-      if (data.invoices) {
-        await db.invoices.clear();
-        await db.invoices.bulkAdd(data.invoices.map(i => { const { id, ...rest } = i; return rest; }));
-      }
-      if (data.quotations) {
-        await db.quotations.clear();
-        await db.quotations.bulkAdd(data.quotations.map(q => { const { id, ...rest } = q; return rest; }));
-      }
-      if (data.creditNotes) {
-        await db.creditNotes.clear();
-        await db.creditNotes.bulkAdd(data.creditNotes.map(n => { const { id, ...rest } = n; return rest; }));
-      }
-      if (data.stockLogs) {
-        await db.stockLogs.clear();
-        await db.stockLogs.bulkAdd(data.stockLogs.map(s => { const { id, ...rest } = s; return rest; }));
-      }
-      if (data.settings) {
+      if (Array.isArray(data.settings)) {
         for (const s of data.settings) {
-          // Never restore machine-specific folder handles from a backup file.
-          if (s.key === 'autoBackupDir') continue;
+          if (s.key === 'autoBackupDir') continue; // machine-specific, never restore
           await db.settings.put(s);
         }
       }
@@ -190,7 +192,7 @@ export default function Settings() {
       showToast('นำเข้าข้อมูลสำเร็จ');
       loadSettings();
     } catch (err) {
-      showToast('ไฟล์ไม่ถูกต้อง: ' + err.message, 'error');
+      showToast('เกิดข้อผิดพลาดระหว่างนำเข้า: ' + err.message, 'error');
     }
     event.target.value = '';
   }

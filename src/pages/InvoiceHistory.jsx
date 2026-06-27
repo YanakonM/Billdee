@@ -160,7 +160,7 @@ export default function InvoiceHistory() {
       </tr>
     `).join('');
 
-    printWindow.document.write(`
+    let docHtml = `
       <html>
         <head>
           <title>${docTitle} ${target.invoiceNumber}</title>
@@ -295,7 +295,13 @@ export default function InvoiceHistory() {
           </div>
         </body>
       </html>
-    `);
+    `;
+    // Tax invoices print as ต้นฉบับ + สำเนา (two pages).
+    if (target.type === 'tax_invoice') {
+      docHtml = docHtml.replace(/<body>([\s\S]*)<\/body>/, (m, inner) =>
+        `<body>${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}</body>`);
+    }
+    printWindow.document.write(docHtml);
     printWindow.document.close();
     setTimeout(() => printWindow.print(), 500);
   }

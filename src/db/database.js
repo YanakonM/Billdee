@@ -169,21 +169,29 @@ async function maxCodeNumber(table, prefix) {
 // the incremented counter in a single transaction, so two tabs (or a rapid
 // double-click) can never produce a duplicate document number.
 // kind: 'invoice' | 'quotation' | 'credit' | 'debit'
-export async function reserveDocumentNumber(kind = 'invoice') {
-  return db.transaction('rw', db.settings, async () => {
+// App-wide lock: serialize every number reservation so the read-increment-write
+// is atomic even on stores whose transaction() is a passthrough (SQLite/PocketBase),
+// not just IndexedDB. Prevents duplicate document numbers.
+let _numberLock = Promise.resolve();
+
+export function reserveDocumentNumber(kind = 'invoice') {
+  const run = _numberLock.then(() => db.transaction('rw', db.settings, async () => {
     const setting = await db.settings.get('invoice');
     const v = setting.value;
     const conf = {
-      invoice:   { prefix: v.prefix || 'INV',          key: 'nextNumber' },
-      quotation: { prefix: v.quotationPrefix || 'QT',  key: 'nextQuotationNumber' },
-      credit:    { prefix: v.creditNotePrefix || 'CN', key: 'nextCreditNoteNumber' },
-      debit:     { prefix: v.debitNotePrefix || 'DN',  key: 'nextDebitNoteNumber' },
+      invoice:   { prefix: v.prefix || 'INV',            key: 'nextNumber' },
+      delivery:  { prefix: v.deliveryNotePrefix || 'DO', key: 'nextDeliveryNoteNumber' },
+      quotation: { prefix: v.quotationPrefix || 'QT',    key: 'nextQuotationNumber' },
+      credit:    { prefix: v.creditNotePrefix || 'CN',   key: 'nextCreditNoteNumber' },
+      debit:     { prefix: v.debitNotePrefix || 'DN',    key: 'nextDebitNoteNumber' },
     }[kind] || { prefix: v.prefix || 'INV', key: 'nextNumber' };
     const num = v[conf.key] || 1;
     v[conf.key] = num + 1;
     await db.settings.put({ key: 'invoice', value: v });
     return `${conf.prefix}-${String(num).padStart(6, '0')}`;
-  });
+  }));
+  _numberLock = run.catch(() => {}); // keep the chain alive after a failure
+  return run;
 }
 
 // Generate next customer code
