@@ -8,6 +8,14 @@ export default function Layout() {
   const { toasts, confirmDialog, resolveConfirm } = useApp();
   const [otherTabOpen, setOtherTabOpen] = useState(false);
 
+  // Escape dismisses the confirm dialog (same as clicking ยกเลิก).
+  useEffect(() => {
+    if (!confirmDialog) return;
+    const onKey = (e) => { if (e.key === 'Escape') resolveConfirm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirmDialog, resolveConfirm]);
+
   // Single-tab guard: hold a web lock for the app's lifetime. If another tab
   // already holds it, show a blocking warning — two tabs editing the same
   // IndexedDB invites confusion (stale lists, double prints).
@@ -16,14 +24,34 @@ export default function Layout() {
   useEffect(() => {
     if (!navigator.locks || isTauri()) return;
     let releaseLock;
-    navigator.locks.request('texv2-app', { ifAvailable: true }, (lock) => {
-      if (!lock) {
-        setOtherTabOpen(true);
-        return;
-      }
+    let cancelled = false;
+
+    // Resolves to false when the lock wasn't available; holds it otherwise.
+    const acquire = () => navigator.locks.request('texv2-app', { ifAvailable: true }, (lock) => {
+      // Effect already cleaned up before the grant (React StrictMode
+      // mounts→unmounts→remounts): return immediately so the lock frees up.
+      if (cancelled) return;
+      if (!lock) return false;
       return new Promise((resolve) => { releaseLock = resolve; });
+    });
+
+    acquire().then((res) => {
+      if (cancelled || res !== false) return;
+      // Not available on the first try. Under StrictMode the "holder" is our
+      // own just-unmounted first mount, whose lock clears within a tick — so
+      // retry once before declaring that another tab has the app open.
+      setTimeout(() => {
+        if (cancelled) return;
+        acquire().then((res2) => {
+          if (!cancelled && res2 === false) setOtherTabOpen(true);
+        }).catch(() => {});
+      }, 250);
     }).catch(() => {});
-    return () => releaseLock?.();
+
+    return () => {
+      cancelled = true;
+      releaseLock?.();
+    };
   }, []);
 
   if (otherTabOpen) {

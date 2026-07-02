@@ -15,21 +15,32 @@ export function setPbUrl(url) {
   try { localStorage.setItem('pbUrl', url); } catch {}
 }
 
-// 'pocketbase' to use the server, anything else (default) stays on IndexedDB.
+// 'pocketbase' | 'supabase' to use a server; anything else (default) stays on
+// IndexedDB.
 export function storageMode() {
   try {
-    return localStorage.getItem('texStorage') === 'pocketbase' ? 'pocketbase' : 'indexeddb';
+    const m = localStorage.getItem('texStorage');
+    return m === 'pocketbase' || m === 'supabase' ? m : 'indexeddb';
   } catch {
     return 'indexeddb';
   }
 }
 
 export function setStorageMode(mode) {
-  try { localStorage.setItem('texStorage', mode === 'pocketbase' ? 'pocketbase' : 'indexeddb'); } catch {}
+  const m = mode === 'pocketbase' || mode === 'supabase' ? mode : 'indexeddb';
+  try { localStorage.setItem('texStorage', m); } catch {}
 }
 
 export const pb = new PocketBase(getPbUrl());
 pb.autoCancellation(false); // we issue many parallel reads on load; don't auto-cancel
+
+// Persist a new URL AND retarget the live client. Without updating
+// `pb.baseUrl`, the connection test in Settings would keep pinging the
+// previously-saved URL instead of the one the user just typed.
+export function applyPbUrl(url) {
+  setPbUrl(url);
+  try { pb.baseUrl = url; } catch { /* ignore */ }
+}
 
 // Quick reachability probe for the settings UI.
 export async function pingPb() {

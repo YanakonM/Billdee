@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useState } from 'react';
 import { db } from '../db/database';
 import translations from '../utils/i18n';
+import { setDateEra } from '../utils/helpers';
 
 const AppContext = createContext(null);
 
@@ -50,12 +51,17 @@ export function AppProvider({ children }) {
     setConfirmDialog(prev => { prev?.resolve(result); return null; });
   }, []);
 
-  // Load language on mount
+  // Load language + date era on mount
   useEffect(() => {
     (async () => {
       const langSetting = await db.settings.get('language');
       if (langSetting) {
         dispatch({ type: 'SET_LANGUAGE', payload: langSetting.value });
+      }
+      // Honour the พ.ศ./ค.ศ. choice everywhere dates are formatted.
+      const invSetting = await db.settings.get('invoice');
+      if (invSetting?.value?.dateFormat) {
+        setDateEra(invSetting.value.dateFormat);
       }
     })();
   }, []);

@@ -1,9 +1,15 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import Layout from './components/Layout/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useEffect, lazy, Suspense } from 'react';
 import { initializeSettings } from './db/database';
+import { isTauri } from './db/sqlStore';
+
+// The Tauri asset protocol serves files verbatim with no SPA fallback, so a
+// refresh (F5/Ctrl+R) while on e.g. /invoices would blank-screen the desktop
+// app under BrowserRouter. HashRouter keeps every route inside index.html.
+const Router = isTauri() ? HashRouter : BrowserRouter;
 
 // Lazy-load pages so the app opens fast (heavy libs like pdf/qr/scanner load on demand).
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -43,7 +49,7 @@ function App() {
     <ErrorBoundary>
       <AppProvider>
         <AppInitializer>
-          <BrowserRouter>
+          <Router>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route element={<Layout />}>
@@ -60,7 +66,7 @@ function App() {
                 </Route>
               </Routes>
             </Suspense>
-          </BrowserRouter>
+          </Router>
         </AppInitializer>
       </AppProvider>
     </ErrorBoundary>

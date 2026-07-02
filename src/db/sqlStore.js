@@ -35,6 +35,11 @@ async function ensureDb() {
       await d.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
       await d.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)');
       await d.execute('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
+      // Match Dexie's `&code` unique index so the two storage modes behave the
+      // same. try/catch: an existing DB that already contains duplicate codes
+      // must still open — the index is then skipped rather than bricking init.
+      try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_code ON customers(code)'); } catch { /* duplicates exist — skip */ }
+      try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code ON products(code)'); } catch { /* duplicates exist — skip */ }
       _db = d;
       return d;
     })();

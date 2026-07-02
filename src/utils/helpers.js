@@ -53,25 +53,26 @@ function numberToThaiText(num) {
 }
 
 export function bahtText(amount) {
-  if (amount === 0) return 'ศูนย์บาทถ้วน';
-  
   const parts = Math.abs(amount).toFixed(2).split('.');
   const baht = parseInt(parts[0]);
   const satang = parseInt(parts[1]);
-  
+
+  // Zero — including tiny amounts that round to 0.00 — reads as full zero baht.
+  if (baht === 0 && satang === 0) return 'ศูนย์บาทถ้วน';
+
   let result = '';
   if (amount < 0) result += 'ลบ';
-  
+
   if (baht > 0) {
     result += numberToThaiText(baht) + 'บาท';
   }
-  
+
   if (satang > 0) {
     result += numberToThaiText(satang) + 'สตางค์';
   } else {
     result += 'ถ้วน';
   }
-  
+
   return result;
 }
 
@@ -107,7 +108,22 @@ export function formatBranch(code) {
   return `สาขาที่ ${c.padStart(5, '0')}`;
 }
 
-// Format date to Thai Buddhist Era
+// Date era — 'th' = Buddhist Era (พ.ศ.), 'en' = Gregorian (ค.ศ.).
+// Set from the invoice settings (dateFormat); cached in localStorage so the
+// very first paint after app start already uses the right era (the settings
+// table is async and loads after the first render).
+let _dateEra = (() => {
+  try { return localStorage.getItem('dateEra') === 'en' ? 'en' : 'th'; } catch { return 'th'; }
+})();
+export function setDateEra(era) {
+  _dateEra = era === 'en' ? 'en' : 'th';
+  try { localStorage.setItem('dateEra', _dateEra); } catch { /* ignore */ }
+}
+function displayYear(d) {
+  return _dateEra === 'th' ? d.getFullYear() + 543 : d.getFullYear();
+}
+
+// Format date to Thai long form (year follows the configured era)
 export function formatDateThai(date) {
   if (!date) return '';
   const d = new Date(date);
@@ -117,8 +133,7 @@ export function formatDateThai(date) {
     'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'
   ];
   const month = months[d.getMonth()];
-  const year = d.getFullYear() + 543;
-  return `${day} ${month} ${year}`;
+  return `${day} ${month} ${displayYear(d)}`;
 }
 
 // Format date short
@@ -127,16 +142,35 @@ export function formatDateShort(date) {
   const d = new Date(date);
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear() + 543;
-  return `${day}/${month}/${year}`;
+  return `${day}/${month}/${displayYear(d)}`;
 }
 
-// Get today's date as ISO string
+// Today's date as YYYY-MM-DD in LOCAL time. (toISOString converts to UTC —
+// in Thailand (UTC+7) that returned yesterday's date for any bill issued
+// before 07:00.)
 export function getToday() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Format any Date as a local YYYY-MM-DD key (same rationale as getToday).
+export function toLocalDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // Generate unique ID
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+// Escape user text before interpolating it into print-HTML strings.
+// Product names / customer names / notes containing < > & " would otherwise
+// break (or inject markup into) the printed document.
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }

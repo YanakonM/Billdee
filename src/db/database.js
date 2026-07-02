@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import { pbStore } from './pbStore';
+import { supabaseStore } from './supabaseStore';
 import { sqlStore, isTauri } from './sqlStore';
 import { storageMode } from './pocketbase';
 
@@ -28,11 +29,11 @@ dexieDb.version(2).stores({
 // Active store the whole app talks to:
 //   1. Installed Tauri desktop app  → SQLite file (automatic, no setup)
 //   2. Browser + PocketBase opt-in  → PocketBase server
-//   3. Browser default              → IndexedDB
+//   3. Browser + Supabase opt-in    → Supabase project (cloud Postgres)
+//   4. Browser default              → IndexedDB
 // Decided once at load; changing the browser option requires a reload.
-export const db = isTauri()
-  ? sqlStore
-  : (storageMode() === 'pocketbase' ? pbStore : dexieDb);
+const browserStore = { pocketbase: pbStore, supabase: supabaseStore }[storageMode()] || dexieDb;
+export const db = isTauri() ? sqlStore : browserStore;
 
 // Initialize default settings
 export async function initializeSettings() {
@@ -45,7 +46,10 @@ export async function initializeSettings() {
           name: 'บริษัท ตัวอย่าง จำกัด',
           nameEn: 'Example Company Co., Ltd.',
           address: '123 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110',
-          taxId: '0123456789012',
+          // Intentionally blank — the old placeholder ('0123456789012') failed
+          // the check-digit validation, so a fresh install could never issue a
+          // tax invoice and the error pointed at data the user didn't type.
+          taxId: '',
           branchCode: '00000', // '00000' = สำนักงานใหญ่ (head office)
           phone: '02-123-4567',
           mobile: '089-123-4567',
@@ -69,9 +73,10 @@ export async function initializeSettings() {
           prefix: 'INV',
           nextNumber: 1,
           vatRate: 7,
-          includeVat: true,
+          // false = prices are ex-VAT (VAT added on top). true = prices already
+          // include VAT (VAT is extracted as amount × rate/(100+rate)).
+          includeVat: false,
           dateFormat: 'th',
-          documentType: 'both',
           quotationPrefix: 'QT',
           nextQuotationNumber: 1,
           creditNotePrefix: 'CN',
@@ -114,10 +119,23 @@ export async function initializeSettings() {
   }
   // Give delivery notes a distinct prefix when it still clashes with debit notes.
   const invSetting = await db.settings.get('invoice');
+  let invDirty = false;
   if (invSetting && (!invSetting.value.deliveryNotePrefix ||
       invSetting.value.deliveryNotePrefix === invSetting.value.debitNotePrefix)) {
     invSetting.value.deliveryNotePrefix = 'DO';
     if (invSetting.value.nextDeliveryNoteNumber == null) invSetting.value.nextDeliveryNoteNumber = 1;
+    invDirty = true;
+  }
+  // Migration: `includeVat` existed in old seeds but was never honoured (VAT
+  // was always added on top). Now that the flag actually works, reset any old
+  // stored value to false ONCE so existing installs keep the behaviour they
+  // have been getting; the user can opt in from Settings afterwards.
+  if (invSetting && !invSetting.value.includeVatMigrated) {
+    invSetting.value.includeVat = false;
+    invSetting.value.includeVatMigrated = true;
+    invDirty = true;
+  }
+  if (invSetting && invDirty) {
     await db.settings.put(invSetting);
   }
 }
@@ -208,8 +226,16 @@ export async function getNextProductCode() {
 
 // Stock management
 export async function updateStock(productId, quantityChange, type = 'sale', note = '') {
+  // Master switch — when stock tracking is disabled in Settings, sales must
+  // not touch stock numbers or write stock logs.
+  const stockSetting = await db.settings.get('stockSettings');
+  if (stockSetting?.value?.trackStock === false) return;
+
   const product = await db.products.get(productId);
   if (!product) return;
+  // stock == null means "this product is not stock-tracked" (the user left the
+  // field blank on purpose) — never turn it into a tracked 0.
+  if (product.stock == null) return;
 
   const currentStock = product.stock || 0;
   const newStock = type === 'sale' || type === 'adjustment_out'
