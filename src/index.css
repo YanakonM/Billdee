@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700;800&display=swap');
+/* Fonts are bundled locally (public/fonts) so the app renders identically
+   offline — critical for a desktop/POS app that must not depend on Google. */
+@import url('/fonts/fonts.css');
 
 /* ============================================
    DESIGN SYSTEM — Billdee Invoice System
