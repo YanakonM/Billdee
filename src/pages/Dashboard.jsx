@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import { db, exportBackup, autoBackupIfDue, runAutoBackup } from '../db/database';
-import { formatNumber, formatCurrency, formatDateShort } from '../utils/helpers';
+import { formatNumber, formatCurrency, formatDateShort, getToday } from '../utils/helpers';
 import {
   FileText, Users, Package, FilePlus, TrendingUp,
   AlertCircle, Clock, ArrowRight, Receipt, AlertTriangle, FileCheck, BarChart3,
@@ -50,9 +50,10 @@ export default function Dashboard() {
   }
 
   async function loadDashboard() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getToday(); // local date — not UTC-shifted
 
     const invoices = await db.invoices.toArray();
+    const creditNotes = await db.creditNotes.toArray();
     const customers = await db.customers.toArray();
     const products = await db.products.count();
 
@@ -64,18 +65,26 @@ export default function Dashboard() {
       : Infinity;
     setBackupReminder(invoices.length > 0 && daysSince >= 7 ? { days: daysSince, lastAt } : null);
 
-    const todayInvoices = invoices.filter(inv => inv.date === today);
-    const unpaid = invoices.filter(inv => inv.status === 'unpaid');
+    // Sales figures exclude delivery notes (not sales documents — counting
+    // them would double-count) and cancelled/voided documents, and reflect
+    // credit/debit notes.
+    const salesInvoices = invoices.filter(inv => inv.type !== 'delivery' && inv.status !== 'cancelled');
+    const todayInvoices = salesInvoices.filter(inv => inv.date === today);
+    const unpaid = salesInvoices.filter(inv => inv.status === 'unpaid');
+    const noteAdjust = (list) => list.reduce((s, n) =>
+      s + (n.type === 'credit' ? -(n.adjustAmount || 0) : (n.adjustAmount || 0)), 0);
 
     setStats({
-      totalInvoices: invoices.length,
+      totalInvoices: salesInvoices.length,
       todayInvoices: todayInvoices.length,
-      totalRevenue: invoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0),
-      todayRevenue: todayInvoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0),
+      totalRevenue: salesInvoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0) + noteAdjust(creditNotes),
+      todayRevenue: todayInvoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0)
+        + noteAdjust(creditNotes.filter(n => n.date === today)),
       totalCustomers: customers.length,
       totalProducts: products,
       unpaidCount: unpaid.length,
-      unpaidAmount: unpaid.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0),
+      // What the customer actually owes — net of withholding tax when present.
+      unpaidAmount: unpaid.reduce((sum, inv) => sum + ((inv.netPayable ?? inv.grandTotal) || 0), 0),
     });
 
     // Recent invoices (last 5)
@@ -87,7 +96,7 @@ export default function Dashboard() {
 
     // Top customers by purchase
     const custMap = {};
-    invoices.forEach(inv => {
+    salesInvoices.forEach(inv => {
       if (inv.customerName) {
         if (!custMap[inv.customerName]) {
           custMap[inv.customerName] = { name: inv.customerName, total: 0, count: 0 };
@@ -107,7 +116,7 @@ export default function Dashboard() {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const overdueDate = sevenDaysAgo.toISOString().split('T')[0];
     setOverdueInvoices(
-      invoices.filter(inv => inv.status === 'unpaid' && inv.date < overdueDate)
+      salesInvoices.filter(inv => inv.status === 'unpaid' && inv.date < overdueDate)
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(0, 5)
     );
@@ -278,8 +287,8 @@ export default function Dashboard() {
                             {formatNumber(inv.grandTotal)}
                           </td>
                           <td>
-                            <span className={`badge ${inv.status === 'paid' ? 'badge-success' : 'badge-warning'}`}>
-                              {inv.status === 'paid' ? 'ชำระแล้ว' : 'ค้างชำระ'}
+                            <span className={`badge ${inv.status === 'paid' ? 'badge-success' : inv.status === 'cancelled' ? 'badge-danger' : 'badge-warning'}`}>
+                              {inv.status === 'paid' ? 'ชำระแล้ว' : inv.status === 'cancelled' ? 'ยกเลิก' : 'ค้างชำระ'}
                             </span>
                           </td>
                         </tr>
@@ -369,7 +378,7 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div style={{ fontWeight: 700, fontFamily: 'var(--font-en)', color: 'var(--color-danger-600)' }}>
-                          ฿{formatNumber(inv.grandTotal, 0)}
+                          ฿{formatNumber(inv.netPayable ?? inv.grandTotal, 0)}
                         </div>
                       </div>
                     );

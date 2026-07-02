@@ -10,9 +10,11 @@ import {
   Save, Building2, CreditCard, FileText, Upload, Download,
   RefreshCw, AlertTriangle, Image, Database
 } from 'lucide-react';
-import { storageMode, setStorageMode, getPbUrl, setPbUrl, pingPb } from '../db/pocketbase';
+import { storageMode, setStorageMode, getPbUrl, applyPbUrl, pingPb } from '../db/pocketbase';
+import { getSupabaseUrl, getSupabaseKey, setSupabaseConfig, pingSupabase } from '../db/supabaseStore';
 import { isTauri } from '../db/sqlStore';
 import { checkForUpdate, installUpdate } from '../utils/updater';
+import { isValidThaiTaxId, setDateEra } from '../utils/helpers';
 
 export default function Settings() {
   const { showToast, appConfirm } = useApp();
@@ -38,6 +40,9 @@ export default function Settings() {
   const [storeMode, setStoreMode] = useState(storageMode());
   const [pbUrl, setPbUrlState] = useState(getPbUrl());
   const [pbStatus, setPbStatus] = useState(null); // null | 'checking' | 'ok' | 'fail'
+  const [sbUrl, setSbUrl] = useState(getSupabaseUrl());
+  const [sbKey, setSbKey] = useState(getSupabaseKey());
+  const [sbStatus, setSbStatus] = useState(null); // null | 'checking' | 'ok' | 'fail'
   const [update, setUpdate] = useState(null); // { available, version, notes, update } | { available:false }
   const [updateBusy, setUpdateBusy] = useState(false);
 
@@ -87,14 +92,26 @@ export default function Settings() {
 
   async function handleTestPb() {
     setPbStatus('checking');
-    setPbUrl(pbUrl);
+    // Retarget the live client too — otherwise the ping goes to the OLD url
+    // and the test result lies about the address the user just typed.
+    applyPbUrl(pbUrl);
     const ok = await pingPb();
     setPbStatus(ok ? 'ok' : 'fail');
     showToast(ok ? 'เชื่อมต่อ PocketBase สำเร็จ' : 'เชื่อมต่อไม่ได้ — เช็คว่า server รันอยู่และ URL ถูก', ok ? 'success' : 'error');
   }
 
+  async function handleTestSupabase() {
+    setSbStatus('checking');
+    setSupabaseConfig(sbUrl.trim(), sbKey.trim());
+    const ok = await pingSupabase();
+    setSbStatus(ok ? 'ok' : 'fail');
+    showToast(ok ? 'เชื่อมต่อ Supabase สำเร็จ' : 'เชื่อมต่อไม่ได้ — เช็ค URL / anon key และว่าสร้างตารางตาม README-SUPABASE.md แล้ว',
+      ok ? 'success' : 'error');
+  }
+
   function handleApplyStorage() {
-    setPbUrl(pbUrl);
+    applyPbUrl(pbUrl);
+    setSupabaseConfig(sbUrl.trim(), sbKey.trim());
     setStorageMode(storeMode);
     showToast('บันทึกแล้ว — กำลังรีโหลดเพื่อใช้ที่เก็บข้อมูลใหม่');
     setTimeout(() => window.location.reload(), 900);
@@ -127,11 +144,21 @@ export default function Settings() {
   }
 
   async function handleSave() {
+    // Soft-validate the company tax ID here so a bad number is caught where
+    // it's typed — not later at the counter when a tax invoice fails to save.
+    if (company.taxId && !isValidThaiTaxId(company.taxId)) {
+      const ok = await appConfirm(
+        'เลขประจำตัวผู้เสียภาษีไม่ถูกต้องตามหลักตรวจสอบ (13 หลัก)\nถ้าบันทึกไว้ จะออกใบกำกับภาษีไม่ได้จนกว่าจะแก้ไข\nต้องการบันทึกต่อหรือไม่?',
+        { okLabel: 'บันทึกต่อ' });
+      if (!ok) return;
+    }
     try {
       await db.settings.put({ key: 'company', value: company });
       await db.settings.put({ key: 'bank', value: bank });
       await db.settings.put({ key: 'invoice', value: invoice });
       await db.settings.put({ key: 'stockSettings', value: stock });
+      // Apply the พ.ศ./ค.ศ. choice immediately (no reload needed).
+      setDateEra(invoice.dateFormat);
       showToast('บันทึกการตั้งค่าสำเร็จ');
     } catch (err) {
       showToast('เกิดข้อผิดพลาด: ' + err.message, 'error');
@@ -176,11 +203,73 @@ export default function Settings() {
       // 2) Safety snapshot of current data before overwriting.
       try { await exportBackup(); } catch { /* non-fatal */ }
 
-      // 3) Restore only fields that are valid arrays.
-      const strip = (rows) => rows.map(r => { const { id, ...rest } = r; return rest; });
-      for (const t of present) {
-        await db[t].clear();
-        await db[t].bulkAdd(strip(data[t]));
+      // 3) Restore with ID REMAPPING. The stores assign fresh ids on insert,
+      //    so every cross-record reference (invoice→customer, creditNote→
+      //    invoice, stockLog→product, items[].productId) must be rewritten to
+      //    the new ids — otherwise restored links silently point at the wrong
+      //    records.
+      const customerIdMap = new Map();
+      const productIdMap = new Map();
+      const invoiceIdMap = new Map();
+      const remap = (map, oldId) => (oldId == null ? oldId : (map.get(oldId) ?? null));
+      const remapItems = (items) => (items || []).map(it => (
+        it.productId != null ? { ...it, productId: remap(productIdMap, it.productId) } : it
+      ));
+
+      // Parents first (customers, products) so children can look up new ids.
+      if (present.includes('customers')) {
+        await db.customers.clear();
+        for (const { id, ...rest } of data.customers) {
+          const newId = await db.customers.add(rest);
+          customerIdMap.set(id, newId);
+        }
+      }
+      if (present.includes('products')) {
+        await db.products.clear();
+        for (const { id, ...rest } of data.products) {
+          const newId = await db.products.add(rest);
+          productIdMap.set(id, newId);
+        }
+      }
+      if (present.includes('invoices')) {
+        await db.invoices.clear();
+        for (const { id, ...rest } of data.invoices) {
+          const newId = await db.invoices.add({
+            ...rest,
+            customerId: remap(customerIdMap, rest.customerId),
+            items: remapItems(rest.items),
+          });
+          invoiceIdMap.set(id, newId);
+        }
+      }
+      if (present.includes('quotations')) {
+        await db.quotations.clear();
+        for (const { id, ...rest } of data.quotations) {
+          await db.quotations.add({
+            ...rest,
+            customerId: remap(customerIdMap, rest.customerId),
+            items: remapItems(rest.items),
+          });
+        }
+      }
+      if (present.includes('creditNotes')) {
+        await db.creditNotes.clear();
+        for (const { id, ...rest } of data.creditNotes) {
+          await db.creditNotes.add({
+            ...rest,
+            invoiceId: remap(invoiceIdMap, rest.invoiceId),
+            customerId: remap(customerIdMap, rest.customerId),
+          });
+        }
+      }
+      if (present.includes('stockLogs')) {
+        await db.stockLogs.clear();
+        for (const { id, ...rest } of data.stockLogs) {
+          await db.stockLogs.add({
+            ...rest,
+            productId: remap(productIdMap, rest.productId),
+          });
+        }
       }
       if (Array.isArray(data.settings)) {
         for (const s of data.settings) {
@@ -436,6 +525,20 @@ export default function Settings() {
                       </select>
                     </div>
                   </div>
+                  <div className="form-group">
+                    <label className="form-label">รูปแบบราคาในใบกำกับภาษี</label>
+                    <select className="form-select" value={invoice.includeVat ? 'inc' : 'exc'}
+                      onChange={e => setInvoice({ ...invoice, includeVat: e.target.value === 'inc' })}
+                      style={{ maxWidth: '360px' }}>
+                      <option value="exc">ราคายังไม่รวม VAT — บวก VAT เพิ่มท้ายบิล</option>
+                      <option value="inc">ราคารวม VAT แล้ว — ถอด VAT ออกจากยอด</option>
+                    </select>
+                    <p className="form-help">
+                      {invoice.includeVat
+                        ? `ตัวอย่าง: ขาย 107 บาท → มูลค่าสินค้า ${(107 * 100 / (100 + (invoice.vatRate || 7))).toFixed(2)} + VAT ${(107 * (invoice.vatRate || 7) / (100 + (invoice.vatRate || 7))).toFixed(2)} = 107.00`
+                        : `ตัวอย่าง: ขาย 100 บาท → 100 + VAT ${(invoice.vatRate || 7).toFixed(2)} = ${(100 + (invoice.vatRate || 7)).toFixed(2)}`}
+                    </p>
+                  </div>
 
                   <h3 style={{ margin: '28px 0 16px', fontWeight: 700 }}>การติดตามสต็อก</h3>
                   <div className="form-row">
@@ -584,7 +687,8 @@ export default function Settings() {
                     <select className="form-select" value={storeMode}
                       onChange={e => setStoreMode(e.target.value)} style={{ maxWidth: '360px' }}>
                       <option value="indexeddb">ในเครื่อง — IndexedDB (ค่าเริ่มต้น)</option>
-                      <option value="pocketbase">PocketBase server</option>
+                      <option value="pocketbase">PocketBase server (LAN)</option>
+                      <option value="supabase">Supabase (คลาวด์)</option>
                     </select>
                   </div>
 
@@ -604,6 +708,32 @@ export default function Settings() {
                         {pbStatus === null && 'เครื่องลูกในโรงงานให้ใส่ IP ของเครื่องแม่ เช่น http://192.168.1.50:8090'}
                       </p>
                     </div>
+                  )}
+
+                  {storeMode === 'supabase' && (
+                    <>
+                      <div className="form-group">
+                        <label className="form-label">Supabase Project URL</label>
+                        <input type="text" className="form-input" value={sbUrl}
+                          onChange={e => { setSbUrl(e.target.value); setSbStatus(null); }}
+                          placeholder="https://xxxx.supabase.co" style={{ maxWidth: '420px' }} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Anon (public) key</label>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <input type="password" className="form-input" value={sbKey}
+                            onChange={e => { setSbKey(e.target.value); setSbStatus(null); }}
+                            placeholder="eyJhbGciOi..." style={{ maxWidth: '420px' }} />
+                          <button className="btn btn-outline" onClick={handleTestSupabase}>ทดสอบการเชื่อมต่อ</button>
+                        </div>
+                        <p className="form-help">
+                          {sbStatus === 'checking' && 'กำลังเชื่อมต่อ...'}
+                          {sbStatus === 'ok' && '✅ เชื่อมต่อได้'}
+                          {sbStatus === 'fail' && '❌ เชื่อมต่อไม่ได้ — เช็ค URL / key และรัน SQL สร้างตารางตาม README-SUPABASE.md'}
+                          {sbStatus === null && 'สร้างตารางครั้งแรกด้วย SQL ใน README-SUPABASE.md ก่อนใช้งาน — ข้อมูลจะอยู่บนคลาวด์ ใช้ได้หลายเครื่องผ่านอินเทอร์เน็ต'}
+                        </p>
+                      </div>
+                    </>
                   )}
 
                   <button className="btn btn-primary" onClick={handleApplyStorage} style={{ marginTop: '8px' }}>

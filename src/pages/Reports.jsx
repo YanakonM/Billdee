@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Header from '../components/Layout/Header';
 import { db } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateShort } from '../utils/helpers';
+import { formatNumber, formatDateShort, toLocalDateKey } from '../utils/helpers';
 import {
   BarChart3, TrendingUp, Users, Package, Download,
   Calendar, FileSpreadsheet, ArrowUpRight, ArrowDownRight
@@ -61,6 +61,7 @@ function SimpleBarChart({ data, maxValue, color = '#6366f1', height = 250 }) {
 export default function Reports() {
   const { showToast } = useApp();
   const [invoices, setInvoices] = useState([]);
+  const [creditNotes, setCreditNotes] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
   const [period, setPeriod] = useState('month'); // week, month, year, custom
@@ -80,6 +81,7 @@ export default function Reports() {
 
   async function loadData() {
     setInvoices(await db.invoices.toArray());
+    setCreditNotes(await db.creditNotes.toArray());
     setCustomers(await db.customers.toArray());
     setProducts(await db.products.toArray());
   }
@@ -99,11 +101,11 @@ export default function Reports() {
     if (period === 'week') {
       const start = new Date(now);
       start.setDate(start.getDate() - 7);
-      return { start: start.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
+      return { start: toLocalDateKey(start), end: toLocalDateKey(now) };
     }
     if (period === 'month') {
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { start: start.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
+      return { start: toLocalDateKey(start), end: toLocalDateKey(now) };
     }
     if (period === 'year') {
       return { start: `${selectedYear}-01-01`, end: `${selectedYear}-12-31` };
@@ -118,22 +120,36 @@ export default function Reports() {
     return range;
   }, [period, selectedYear, customFrom, customTo]);
 
-  // Filtered invoices by period
+  // Filtered invoices by period. Sales figures exclude:
+  //  - delivery notes (ใบส่งของ) — not sales documents; counting them would
+  //    double-count sales that also issued a receipt/tax invoice
+  //  - cancelled documents — voided, kept only for the audit trail
   const periodInvoices = useMemo(() => {
-    return invoices.filter(inv => inv.date >= dateRange.start && inv.date <= dateRange.end);
+    return invoices.filter(inv =>
+      inv.date >= dateRange.start && inv.date <= dateRange.end &&
+      inv.type !== 'delivery' && inv.status !== 'cancelled');
   }, [invoices, dateRange]);
+
+  // Credit/debit notes in the same period — sales must reflect them.
+  const periodNotes = useMemo(() => {
+    return creditNotes.filter(n => n.date >= dateRange.start && n.date <= dateRange.end);
+  }, [creditNotes, dateRange]);
 
   // Summary stats
   const stats = useMemo(() => {
-    const total = periodInvoices.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
+    const gross = periodInvoices.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
+    // ใบลดหนี้ subtracts from sales, ใบเพิ่มหนี้ adds.
+    const creditTotal = periodNotes.filter(n => n.type === 'credit').reduce((s, n) => s + (n.adjustAmount || 0), 0);
+    const debitTotal = periodNotes.filter(n => n.type === 'debit').reduce((s, n) => s + (n.adjustAmount || 0), 0);
+    const total = gross - creditTotal + debitTotal;
     const paid = periodInvoices.filter(i => i.status === 'paid');
     const unpaid = periodInvoices.filter(i => i.status === 'unpaid');
     const paidAmount = paid.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
-    const unpaidAmount = unpaid.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
-    const avgPerInvoice = periodInvoices.length > 0 ? total / periodInvoices.length : 0;
+    const unpaidAmount = unpaid.reduce((s, inv) => s + ((inv.netPayable ?? inv.grandTotal) || 0), 0);
+    const avgPerInvoice = periodInvoices.length > 0 ? gross / periodInvoices.length : 0;
 
-    return { total, paidAmount, unpaidAmount, count: periodInvoices.length, avgPerInvoice, paidCount: paid.length, unpaidCount: unpaid.length };
-  }, [periodInvoices]);
+    return { total, gross, creditTotal, debitTotal, paidAmount, unpaidAmount, count: periodInvoices.length, avgPerInvoice, paidCount: paid.length, unpaidCount: unpaid.length };
+  }, [periodInvoices, periodNotes]);
 
   // Chart data: daily buckets for week/month, monthly buckets for year/custom.
   const dailyData = useMemo(() => {
@@ -157,12 +173,24 @@ export default function Reports() {
         if (days[key]) days[key].value += inv.grandTotal || 0;
       });
     } else {
-      const daysCount = period === 'week' ? 7 : new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      for (let i = daysCount - 1; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        const key = d.toISOString().split('T')[0];
-        days[key] = { label: `${d.getDate()}`, value: 0 };
+      // Local-date key (NOT toISOString — that converts to UTC and shifts the
+      // date back a day for any time before 07:00 in Thailand, UTC+7).
+      const localKey = toLocalDateKey;
+
+      if (period === 'month') {
+        // "เดือนนี้" buckets run from the 1st of THIS month to today — the old
+        // rolling window mixed in last month's days (all zero) with duplicate
+        // day-number labels.
+        for (let d = new Date(now.getFullYear(), now.getMonth(), 1); d <= now; d.setDate(d.getDate() + 1)) {
+          days[localKey(d)] = { label: `${d.getDate()}`, value: 0 };
+        }
+      } else {
+        // week: rolling 7 days ending today
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          days[localKey(d)] = { label: `${d.getDate()}`, value: 0 };
+        }
       }
       periodInvoices.forEach(inv => {
         if (days[inv.date]) days[inv.date].value += inv.grandTotal || 0;
@@ -197,6 +225,20 @@ export default function Reports() {
     return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10);
   }, [periodInvoices]);
 
+  const typeLabel = (t) =>
+    t === 'tax_invoice' ? 'ใบกำกับภาษี' : t === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จ';
+  const statusLabelCsv = (s) =>
+    s === 'paid' ? 'ชำระแล้ว' : s === 'cancelled' ? 'ยกเลิก' : 'ค้างชำระ';
+
+  // RFC-4180 quoting — names/addresses containing commas, quotes or newlines
+  // must not shift the columns.
+  const csvCell = (v) => {
+    const s = String(v ?? '');
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  // TSV cells can't contain tabs/newlines — flatten them to spaces.
+  const tsvCell = (v) => String(v ?? '').replace(/[\t\n\r]+/g, ' ');
+
   // Export CSV
   function exportCSV() {
     const headers = ['เลขที่ใบเสร็จ', 'วันที่', 'ลูกค้า', 'ประเภท', 'ยอดรวม', 'สถานะ'];
@@ -204,11 +246,11 @@ export default function Reports() {
       inv.invoiceNumber,
       inv.date,
       inv.customerName || '',
-      inv.type === 'tax_invoice' ? 'ใบกำกับภาษี' : 'ใบเสร็จ',
+      typeLabel(inv.type),
       inv.grandTotal?.toFixed(2) || '0.00',
-      inv.status === 'paid' ? 'ชำระแล้ว' : 'ค้างชำระ',
+      statusLabelCsv(inv.status),
     ]);
-    const csv = '\uFEFF' + [headers, ...rows].map(r => r.join(',')).join('\n');
+    const csv = '\uFEFF' + [headers, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -230,7 +272,7 @@ export default function Reports() {
           idx === 0 ? inv.date : '',
           idx === 0 ? (inv.customerName || '') : '',
           idx === 0 ? (inv.customerAddress || '') : '',
-          idx === 0 ? (inv.type === 'tax_invoice' ? 'ใบกำกับภาษี' : 'ใบเสร็จ') : '',
+          idx === 0 ? typeLabel(inv.type) : '',
           item.description || '',
           item.quantity || '',
           item.unitPrice || '',
@@ -238,12 +280,12 @@ export default function Reports() {
           idx === 0 ? (inv.subtotal?.toFixed(2) || '') : '',
           idx === 0 ? (inv.vatAmount?.toFixed(2) || '') : '',
           idx === 0 ? (inv.grandTotal?.toFixed(2) || '') : '',
-          idx === 0 ? (inv.status === 'paid' ? 'ชำระแล้ว' : 'ค้างชำระ') : '',
+          idx === 0 ? statusLabelCsv(inv.status) : '',
           idx === 0 ? (inv.paymentMethod || '') : '',
         ]);
       });
     });
-    const tsv = '\uFEFF' + [headers, ...rows].map(r => r.join('\t')).join('\n');
+    const tsv = '\uFEFF' + [headers, ...rows].map(r => r.map(tsvCell).join('\t')).join('\n');
     const blob = new Blob([tsv], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -322,9 +364,13 @@ export default function Reports() {
           <div className="stat-card stat-card--primary">
             <div className="stat-icon stat-icon--primary"><TrendingUp size={24} /></div>
             <div className="stat-info">
-              <div className="stat-label">ยอดขายรวม</div>
+              <div className="stat-label">ยอดขายรวม (หลังหักลดหนี้)</div>
               <div className="stat-value">{formatNumber(stats.total, 0)}</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-gray-500)' }}>{stats.count} ใบ</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-gray-500)' }}>
+                {stats.count} ใบ
+                {stats.creditTotal > 0 && ` · ลดหนี้ -${formatNumber(stats.creditTotal, 0)}`}
+                {stats.debitTotal > 0 && ` · เพิ่มหนี้ +${formatNumber(stats.debitTotal, 0)}`}
+              </div>
             </div>
           </div>
           <div className="stat-card stat-card--success">

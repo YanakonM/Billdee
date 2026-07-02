@@ -3,7 +3,7 @@ import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
 import { db, getNextCreditNoteNumber, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateShort, formatDateThai, getToday, bahtText } from '../utils/helpers';
+import { formatNumber, formatDateShort, formatDateThai, getToday, bahtText, escapeHtml } from '../utils/helpers';
 import { printHtml } from '../utils/print';
 import {
   FilePlus, Search, Printer, Trash2, FileText, Eye,
@@ -78,13 +78,43 @@ export default function CreditNotes() {
       showToast('กรุณาเลือกใบเสร็จอ้างอิง', 'error');
       return;
     }
-    if (!adjustAmount || isNaN(adjustAmount)) {
-      showToast('กรุณากรอกจำนวนเงินที่ปรับ', 'error');
+    if (!adjustAmount || isNaN(adjustAmount) || parseFloat(adjustAmount) <= 0) {
+      showToast('กรุณากรอกจำนวนเงินที่ปรับ (มากกว่า 0)', 'error');
+      return;
+    }
+    const adjust = parseFloat(adjustAmount);
+    // A credit note cannot reduce the bill below zero.
+    if (noteType === 'credit' && adjust > (selectedInvoice.grandTotal || 0)) {
+      showToast(`ลดหนี้ได้ไม่เกินยอดเดิม (${formatNumber(selectedInvoice.grandTotal)} บาท)`, 'error');
+      return;
+    }
+    if (!reason.trim()) {
+      showToast('กรุณาระบุเหตุผล', 'error');
       return;
     }
     setSaving(true);
     try {
-      const finalNumber = numberEdited ? noteNumber : await reserveDocumentNumber(noteType);
+      // Duplicate-number guard (same rule as invoices/quotations).
+      const existing = await db.creditNotes.toArray();
+      let finalNumber = noteNumber.trim();
+      if (!numberEdited) {
+        finalNumber = await reserveDocumentNumber(noteType);
+        let guard = 0;
+        while (existing.some(n => n.noteNumber === finalNumber) && guard++ < 500) {
+          finalNumber = await reserveDocumentNumber(noteType);
+        }
+      } else if (existing.some(n => n.noteNumber === finalNumber)) {
+        showToast(`เลขที่ "${finalNumber}" ถูกใช้ไปแล้ว — กรุณาใช้เลขอื่น`, 'error');
+        setSaving(false);
+        return;
+      }
+
+      // When the referenced bill is a VAT tax invoice, the adjustment carries
+      // VAT too — Thai credit/debit notes must show มูลค่า + VAT ของผลต่าง.
+      const refVatRate = selectedInvoice.type === 'tax_invoice' ? (selectedInvoice.vatRate || 0) : 0;
+      const adjustVatAmount = refVatRate > 0 ? adjust * refVatRate / (100 + refVatRate) : 0;
+      const adjustExVat = adjust - adjustVatAmount;
+
       await db.creditNotes.add({
         noteNumber: finalNumber,
         date: noteDate,
@@ -96,10 +126,13 @@ export default function CreditNotes() {
         customerAddress: selectedInvoice.customerAddress,
         reason,
         originalAmount: selectedInvoice.grandTotal,
-        adjustAmount: parseFloat(adjustAmount),
+        adjustAmount: adjust,
+        adjustVatRate: refVatRate,
+        adjustVatAmount,
+        adjustExVat,
         newAmount: noteType === 'credit'
-          ? selectedInvoice.grandTotal - parseFloat(adjustAmount)
-          : selectedInvoice.grandTotal + parseFloat(adjustAmount),
+          ? selectedInvoice.grandTotal - adjust
+          : selectedInvoice.grandTotal + adjust,
         company: { ...company },
         createdAt: new Date().toISOString(),
       });
@@ -126,32 +159,38 @@ export default function CreditNotes() {
     const titleEn = note.type === 'credit' ? 'Credit Note' : 'Debit Note';
     const company = note.company || {};
 
-    printHtml(`<html><head><title>${title} ${note.noteNumber}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    printHtml(`<html><head><title>${title} ${escapeHtml(note.noteNumber)}</title>
+      <link href="/fonts/fonts.css" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
     </head><body>
       <div style="display:flex;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #1e293b">
         <div><div style="font-size:22px;font-weight:800">${title}</div><div style="font-size:14px;color:#64748b">${titleEn}</div></div>
-        <div style="text-align:right"><div style="font-size:18px;font-weight:700">${company.name || ''}</div></div>
+        <div style="display:flex;align-items:flex-start;gap:12px;justify-content:flex-end">
+          ${company.logo ? `<img src="${company.logo}" alt="logo" style="height:52px;max-width:120px;object-fit:contain">` : ''}
+          <div style="text-align:right"><div style="font-size:18px;font-weight:700">${escapeHtml(company.name || '')}</div></div>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
         <div>
-          <div style="font-weight:600">${note.customerName || '-'}</div>
-          <div style="font-size:12px">${note.customerAddress || ''}</div>
+          <div style="font-weight:600">${escapeHtml(note.customerName || '-')}</div>
+          <div style="font-size:12px">${escapeHtml(note.customerAddress || '')}</div>
         </div>
         <div style="text-align:right">
-          <div>เลขที่: <strong>${note.noteNumber}</strong></div>
+          <div>เลขที่: <strong>${escapeHtml(note.noteNumber)}</strong></div>
           <div>วันที่: <strong>${formatDateThai(note.date)}</strong></div>
-          <div>อ้างอิงใบเสร็จ: <strong>${note.refInvoiceNumber}</strong></div>
+          <div>อ้างอิงใบเสร็จ: <strong>${escapeHtml(note.refInvoiceNumber)}</strong></div>
         </div>
       </div>
       <div style="margin:20px 0;padding:16px;background:#f8fafc;border-radius:8px">
         <div style="font-weight:700;margin-bottom:8px">เหตุผล:</div>
-        <div>${note.reason || '-'}</div>
+        <div>${escapeHtml(note.reason || '-')}</div>
       </div>
       <table style="width:100%;border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:10px;border:1px solid #e2e8f0;font-weight:600">ยอดเดิม (ใบเสร็จ ${note.refInvoiceNumber})</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right;font-weight:600">${formatNumber(note.originalAmount)} บาท</td></tr>
-        <tr><td style="padding:10px;border:1px solid #e2e8f0;font-weight:600;color:${note.type === 'credit' ? '#dc2626' : '#059669'}">${note.type === 'credit' ? 'ลดหนี้' : 'เพิ่มหนี้'}</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right;font-weight:700;color:${note.type === 'credit' ? '#dc2626' : '#059669'}">${note.type === 'credit' ? '-' : '+'}${formatNumber(note.adjustAmount)} บาท</td></tr>
+        <tr><td style="padding:10px;border:1px solid #e2e8f0;font-weight:600">ยอดเดิม (ใบเสร็จ ${escapeHtml(note.refInvoiceNumber)})</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right;font-weight:600">${formatNumber(note.originalAmount)} บาท</td></tr>
+        ${note.adjustVatRate > 0 ? `
+        <tr><td style="padding:10px;border:1px solid #e2e8f0">มูลค่าที่${note.type === 'credit' ? 'ลด' : 'เพิ่ม'} (ก่อน VAT)</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right">${formatNumber(note.adjustExVat)} บาท</td></tr>
+        <tr><td style="padding:10px;border:1px solid #e2e8f0">ภาษีมูลค่าเพิ่ม ${note.adjustVatRate}% ของผลต่าง</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right">${formatNumber(note.adjustVatAmount)} บาท</td></tr>` : ''}
+        <tr><td style="padding:10px;border:1px solid #e2e8f0;font-weight:600;color:${note.type === 'credit' ? '#dc2626' : '#059669'}">${note.type === 'credit' ? 'ลดหนี้รวม' : 'เพิ่มหนี้รวม'}</td><td style="padding:10px;border:1px solid #e2e8f0;text-align:right;font-weight:700;color:${note.type === 'credit' ? '#dc2626' : '#059669'}">${note.type === 'credit' ? '-' : '+'}${formatNumber(note.adjustAmount)} บาท</td></tr>
         <tr style="background:#1e293b;color:white"><td style="padding:10px;border:1px solid #334155;font-weight:700">ยอดสุทธิ</td><td style="padding:10px;border:1px solid #334155;text-align:right;font-weight:800;font-size:16px">${formatNumber(note.newAmount)} บาท</td></tr>
       </table>
       <div style="font-size:12px;color:#64748b;margin-top:8px">(${bahtText(note.newAmount)})</div>
@@ -257,16 +296,16 @@ export default function CreditNotes() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">อ้างอิงใบเสร็จ (เฉพาะที่ยังไม่ชำระ) <span className="required">*</span></label>
+          <label className="form-label">อ้างอิงใบเสร็จ <span className="required">*</span></label>
           <select className="form-select" value={selectedInvoice?.id || ''} onChange={e => selectInvoice(e.target.value)}>
             <option value="">เลือกใบเสร็จ</option>
-            {invoices.filter(inv => inv.status === 'unpaid').map(inv => (
+            {invoices.filter(inv => inv.status !== 'cancelled').map(inv => (
               <option key={inv.id} value={inv.id}>
-                {inv.invoiceNumber} — {inv.customerName || 'ไม่ระบุ'} — ฿{formatNumber(inv.grandTotal)}
+                {inv.invoiceNumber} — {inv.customerName || 'ไม่ระบุ'} — ฿{formatNumber(inv.grandTotal)}{inv.status === 'paid' ? ' (ชำระแล้ว)' : ''}
               </option>
             ))}
           </select>
-          <p className="form-help">บิลที่ชำระครบแล้วจะไม่แสดงในรายการ — การปรับยอดทำได้เฉพาะบิลที่ยังค้างชำระ</p>
+          <p className="form-help">อ้างอิงได้ทั้งบิลที่ชำระแล้ว (เช่น คืนสินค้า/คืนเงิน) และบิลค้างชำระ — ยกเว้นบิลที่ถูกยกเลิก</p>
         </div>
 
         {selectedInvoice && (
@@ -286,6 +325,9 @@ export default function CreditNotes() {
           {selectedInvoice && adjustAmount && !isNaN(adjustAmount) && (
             <p className="form-help">
               ยอดสุทธิ: <strong>{formatNumber(noteType === 'credit' ? selectedInvoice.grandTotal - parseFloat(adjustAmount) : selectedInvoice.grandTotal + parseFloat(adjustAmount))} บาท</strong>
+              {selectedInvoice.type === 'tax_invoice' && (selectedInvoice.vatRate || 0) > 0 && (
+                <> · แยกเป็นมูลค่า {formatNumber(parseFloat(adjustAmount) * 100 / (100 + selectedInvoice.vatRate))} + VAT {formatNumber(parseFloat(adjustAmount) * selectedInvoice.vatRate / (100 + selectedInvoice.vatRate))}</>
+              )}
             </p>
           )}
         </div>

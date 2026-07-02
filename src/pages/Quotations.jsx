@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
 import BarcodeScanner from '../components/Scanner/BarcodeScanner';
-import { db, getNextQuotationNumber, reserveDocumentNumber } from '../db/database';
+import { db, getNextQuotationNumber, reserveDocumentNumber, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText } from '../utils/helpers';
+import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, escapeHtml } from '../utils/helpers';
 import { printHtml } from '../utils/print';
 import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
@@ -154,17 +154,36 @@ export default function Quotations() {
     }
   }
 
+  // Add a saved product as a line item — picking the same product again
+  // increments its quantity instead of duplicating the row. `productId` is
+  // kept so stock can be deducted when the quotation converts to an invoice.
+  function addProductAsItem(product) {
+    setItems(prev => {
+      const existing = prev.find(i => i.productId === product.id);
+      if (existing) {
+        return prev.map(i => {
+          if (i.productId !== product.id) return i;
+          const qty = (parseFloat(i.quantity) || 0) + 1;
+          const price = parseFloat(i.unitPrice) || 0;
+          const disc = parseFloat(i.discount) || 0;
+          return { ...i, quantity: qty, total: (qty * price) - disc };
+        });
+      }
+      const newItem = {
+        id: Date.now(),
+        description: product.name + (product.description ? ` - ${product.description}` : ''),
+        quantity: 1,
+        unitPrice: product.price || 0,
+        discount: 0,
+        total: product.price || 0,
+        productId: product.id,
+      };
+      return [...prev.filter(i => i.description), newItem];
+    });
+  }
+
   function selectProduct(product) {
-    const newItem = {
-      id: Date.now(),
-      description: product.name + (product.description ? ` - ${product.description}` : ''),
-      quantity: 1,
-      unitPrice: product.price || 0,
-      discount: 0,
-      total: product.price || 0,
-      productId: product.id,
-    };
-    setItems([...items.filter(i => i.description), newItem]);
+    addProductAsItem(product);
     setProductSearch('');
     setShowProductDropdown(false);
   }
@@ -172,11 +191,7 @@ export default function Quotations() {
   async function handleBarcodeScan(barcode) {
     const product = await db.products.where('barcode').equals(barcode).first();
     if (product) {
-      const newItem = {
-        id: Date.now(), description: product.name, quantity: 1,
-        unitPrice: product.price, discount: 0, total: product.price,
-      };
-      setItems([...items.filter(i => i.description), newItem]);
+      addProductAsItem(product);
       setShowScanner(false);
       showToast(`เพิ่ม "${product.name}" สำเร็จ`);
     } else {
@@ -192,13 +207,37 @@ export default function Quotations() {
       showToast('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ', 'error');
       return;
     }
+    // A line discount larger than the line amount would make the quote negative.
+    const badLine = items.find(i => i.description &&
+      (parseFloat(i.discount) || 0) > (parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0));
+    if (badLine) {
+      showToast(`ส่วนลดของ "${badLine.description}" มากกว่ายอดของรายการ — กรุณาแก้ไข`, 'error');
+      return;
+    }
+    // Quotations need a recipient — confirm before saving a nameless one.
+    if (!selectedCustomer && !customerSearch.trim()) {
+      const ok = await appConfirm('ยังไม่ได้ระบุชื่อลูกค้า ต้องการบันทึกใบเสนอราคาโดยไม่มีลูกค้าหรือไม่?', { okLabel: 'บันทึกต่อ' });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
-      // Reserve the running number atomically at save time (unless the user
-      // typed a custom one) so concurrent saves can't collide.
-      const finalNumber = editingId
-        ? quotationNumber
-        : (numberEdited ? quotationNumber : await reserveDocumentNumber('quotation'));
+      // Duplicate-number guard (both manual numbers and the auto series).
+      const existing = await db.quotations.toArray();
+      let finalNumber = quotationNumber.trim();
+      if (!editingId && !numberEdited) {
+        finalNumber = await reserveDocumentNumber('quotation');
+        let guard = 0;
+        while (existing.some(q => q.quotationNumber === finalNumber) && guard++ < 500) {
+          finalNumber = await reserveDocumentNumber('quotation');
+        }
+      } else {
+        const dup = existing.some(q => q.quotationNumber === finalNumber && q.id !== editingId);
+        if (dup) {
+          showToast(`เลขที่ "${finalNumber}" ถูกใช้ไปแล้ว — กรุณาใช้เลขอื่น`, 'error');
+          setSaving(false);
+          return;
+        }
+      }
 
       const data = {
         quotationNumber: finalNumber, date: quotationDate, validUntil,
@@ -209,16 +248,20 @@ export default function Quotations() {
         items: items.filter(i => i.description),
         subtotal, grandTotal: subtotal,
         preparedBy, notes,
-        status: 'pending', // pending, accepted, rejected, converted
         company: { ...company },
-        createdAt: new Date().toISOString(),
       };
 
       if (editingId) {
-        await db.quotations.update(editingId, data);
+        // Editing must NOT reset the status or reorder the list — keep the
+        // existing status/createdAt and stamp updatedAt instead.
+        await db.quotations.update(editingId, { ...data, updatedAt: new Date().toISOString() });
         showToast('แก้ไขใบเสนอราคาสำเร็จ');
       } else {
-        await db.quotations.add(data);
+        await db.quotations.add({
+          ...data,
+          status: 'pending', // pending, accepted, rejected, converted
+          createdAt: new Date().toISOString(),
+        });
         showToast('บันทึกใบเสนอราคาสำเร็จ');
       }
       setShowForm(false);
@@ -230,10 +273,40 @@ export default function Quotations() {
     }
   }
 
+  // Open an existing quotation in the form for editing.
+  function openEdit(qt) {
+    setEditingId(qt.id);
+    setQuotationNumber(qt.quotationNumber);
+    setNumberEdited(true); // keep its number — don't reserve a new one
+    setQuotationDate(qt.date || getToday());
+    setValidUntil(qt.validUntil || '');
+    setCustomerSearch(qt.customerName || '');
+    setSelectedCustomer(qt.customerId ? {
+      id: qt.customerId, name: qt.customerName,
+      address: qt.customerAddress, phone: qt.customerPhone,
+    } : null);
+    setItems((qt.items || []).map((it, idx) => ({
+      id: it.id ?? (Date.now() + idx),
+      description: it.description || '', quantity: it.quantity || 1,
+      unitPrice: it.unitPrice || 0, discount: it.discount || 0,
+      total: it.total || 0, productId: it.productId,
+    })));
+    setNotes(qt.notes || '');
+    setPreparedBy(qt.preparedBy || '');
+    setShowForm(true);
+  }
+
   async function convertToInvoice(qt) {
     try {
       const bank = await db.settings.get('bank');
-      const invNum = await reserveDocumentNumber('invoice');
+
+      // Reserve a number, skipping any already used by manual documents.
+      const existingInvoices = await db.invoices.toArray();
+      let invNum = await reserveDocumentNumber('invoice');
+      let guard = 0;
+      while (existingInvoices.some(i => i.invoiceNumber === invNum) && guard++ < 500) {
+        invNum = await reserveDocumentNumber('invoice');
+      }
 
       await db.invoices.add({
         invoiceNumber: invNum,
@@ -251,12 +324,19 @@ export default function Quotations() {
         preparedBy: qt.preparedBy,
         paymentMethod: 'cash',
         status: 'unpaid',
-        notes: `จากใบเสนอราคา ${qt.quotationNumber}`,
+        notes: [`จากใบเสนอราคา ${qt.quotationNumber}`, qt.notes].filter(Boolean).join(' · '),
         company: qt.company,
         bank: bank?.value || {},
         fromQuotation: qt.quotationNumber,
         createdAt: new Date().toISOString(),
       });
+
+      // Deduct stock exactly like a directly-created invoice would — without
+      // this, sales that went through a quotation silently skipped inventory.
+      for (const item of (qt.items || []).filter(i => i.productId)) {
+        await updateStock(item.productId, parseFloat(item.quantity) || 0, 'sale',
+          `ใบเสร็จ ${invNum} (จาก ${qt.quotationNumber})`);
+      }
 
       // Mark quotation as converted
       await db.quotations.update(qt.id, { status: 'converted' });
@@ -299,30 +379,33 @@ export default function Quotations() {
     const itemRows = items.map((item, idx) => `
       <tr>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0">${item.description}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${item.quantity}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right">${formatNumber(item.unitPrice)}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-weight:600">${formatNumber(item.total)}</td>
       </tr>
     `).join('');
 
-    printHtml(`<html><head><title>ใบเสนอราคา ${qt.quotationNumber}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    printHtml(`<html><head><title>ใบเสนอราคา ${escapeHtml(qt.quotationNumber)}</title>
+      <link href="/fonts/fonts.css" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}table{width:100%;border-collapse:collapse}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
     </head><body>
       <div style="display:flex;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #1e293b">
         <div><div style="font-size:22px;font-weight:800">ใบเสนอราคา</div><div style="font-size:14px;color:#64748b">Quotation</div></div>
-        <div style="text-align:right"><div style="font-size:18px;font-weight:700">${company.name || ''}</div></div>
+        <div style="display:flex;align-items:flex-start;gap:12px;justify-content:flex-end">
+          ${company.logo ? `<img src="${company.logo}" alt="logo" style="height:52px;max-width:120px;object-fit:contain">` : ''}
+          <div style="text-align:right"><div style="font-size:18px;font-weight:700">${escapeHtml(company.name || '')}</div></div>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
         <div>
           <div style="font-size:12px;font-weight:700;color:#64748b">ลูกค้า:</div>
-          <div style="font-weight:600">${qt.customerName || '-'}</div>
-          <div style="font-size:12px">ที่อยู่: ${qt.customerAddress || '-'}</div>
+          <div style="font-weight:600">${escapeHtml(qt.customerName || '-')}</div>
+          <div style="font-size:12px">ที่อยู่: ${escapeHtml(qt.customerAddress || '-')}</div>
         </div>
         <div style="text-align:right">
-          <div>เลขที่: <strong>${qt.quotationNumber}</strong></div>
+          <div>เลขที่: <strong>${escapeHtml(qt.quotationNumber)}</strong></div>
           <div>วันที่: <strong>${formatDateThai(qt.date)}</strong></div>
           <div>ใช้ได้ถึง: <strong>${formatDateThai(qt.validUntil)}</strong></div>
         </div>
@@ -342,7 +425,7 @@ export default function Quotations() {
         <div style="font-size:18px;font-weight:800">รวมทั้งสิ้น: ${formatNumber(qt.grandTotal)} บาท</div>
         <div style="font-size:12px;color:#64748b">(${bahtText(qt.grandTotal)})</div>
       </div>
-      ${qt.notes ? `<div style="margin-top:16px;font-size:12px"><strong>หมายเหตุ:</strong> ${qt.notes}</div>` : ''}
+      ${qt.notes ? `<div style="margin-top:16px;font-size:12px"><strong>หมายเหตุ:</strong> ${escapeHtml(qt.notes)}</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:40px">
         <div style="text-align:center"><div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div><div style="font-size:12px;color:#64748b">ผู้เสนอราคา</div></div>
         <div style="text-align:center"><div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div><div style="font-size:12px;color:#64748b">ผู้อนุมัติ</div></div>
@@ -576,6 +659,9 @@ export default function Quotations() {
                         )}
                         {(qt.status === 'accepted' || qt.status === 'pending') && (
                           <button className="btn btn-ghost btn-sm" onClick={() => convertToInvoice(qt)} title="แปลงเป็นใบเสร็จ"><ArrowRight size={16} /></button>
+                        )}
+                        {qt.status !== 'converted' && (
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(qt)} title="แก้ไข"><Edit2 size={16} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => handlePrint(qt)} title="พิมพ์"><Printer size={16} /></button>
                         <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(qt)} title="ลบ"><Trash2 size={16} /></button>

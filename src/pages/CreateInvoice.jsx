@@ -5,7 +5,7 @@ import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import Modal from '../components/Common/Modal';
 import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId } from '../utils/helpers';
+import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId, escapeHtml } from '../utils/helpers';
 import { generatePromptPayPayload } from '../utils/promptpay';
 import { printHtml } from '../utils/print';
 import { QRCodeSVG } from 'qrcode.react';
@@ -28,6 +28,7 @@ export default function CreateInvoice() {
   const [company, setCompany] = useState({});
   const [bank, setBank] = useState({});
   const [invoiceSettings, setInvoiceSettings] = useState({});
+  const [stockSettings, setStockSettings] = useState({ trackStock: true, showStockWarning: true });
 
   // Invoice Data
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -88,6 +89,15 @@ export default function CreateInvoice() {
     loadSettings();
   }, []);
 
+  // Any form change after a save re-enables the save button — the next save
+  // updates the same document (editingId was set after the first save).
+  useEffect(() => {
+    if (saved) setSaved(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, customerSearch, customerPhone, selectedCustomer, invoiceDate, docType,
+      paymentMethod, paymentStatus, paymentNote, cashReceived, notes, billDiscount,
+      whtEnabled, whtRate, preparedBy]);
+
   async function loadSettings() {
     const companySetting = await db.settings.get('company');
     const bankSetting = await db.settings.get('bank');
@@ -98,6 +108,9 @@ export default function CreateInvoice() {
     if (bankSetting) setBank(bankSetting.value);
     if (invSetting) setInvoiceSettings(invSetting.value);
     if (lastPrepared) setPreparedBy(lastPrepared.value);
+
+    const stockSetting = await db.settings.get('stockSettings');
+    if (stockSetting) setStockSettings(stockSetting.value);
 
     const printSetting = await db.settings.get('printSettings');
     if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
@@ -229,17 +242,40 @@ export default function CreateInvoice() {
     }
   }
 
+  // Add a saved product as a line item. Scanning/picking the same product
+  // again increments its quantity (POS behaviour) instead of adding a
+  // duplicate row. Also warns when the product is already out of stock.
+  function addProductAsItem(product) {
+    setItems(prev => {
+      const existing = prev.find(i => i.productId === product.id);
+      if (existing) {
+        return prev.map(i => {
+          if (i.productId !== product.id) return i;
+          const qty = (parseFloat(i.quantity) || 0) + 1;
+          const price = parseFloat(i.unitPrice) || 0;
+          const disc = parseFloat(i.discount) || 0;
+          return { ...i, quantity: qty, total: (qty * price) - disc };
+        });
+      }
+      const newItem = {
+        id: Date.now(),
+        description: product.name + (product.description ? ` - ${product.description}` : ''),
+        quantity: 1,
+        unitPrice: product.price || 0,
+        discount: 0,
+        total: product.price || 0,
+        productId: product.id,
+      };
+      return [...prev.filter(i => i.description), newItem];
+    });
+    if (stockSettings.trackStock !== false && stockSettings.showStockWarning !== false &&
+        product.stock != null && product.stock <= 0) {
+      showToast(`"${product.name}" สต็อคหมด — เพิ่มรายการแล้ว โปรดตรวจสอบ`, 'warning');
+    }
+  }
+
   function selectProduct(product) {
-    const newItem = {
-      id: Date.now(),
-      description: product.name + (product.description ? ` - ${product.description}` : ''),
-      quantity: 1,
-      unitPrice: product.price || 0,
-      discount: 0,
-      total: product.price || 0,
-      productId: product.id,
-    };
-    setItems([...items.filter(i => i.description), newItem]);
+    addProductAsItem(product);
     setProductSearch('');
     setShowProductDropdown(false);
   }
@@ -248,16 +284,7 @@ export default function CreateInvoice() {
   async function handleBarcodeScan(barcode) {
     const product = await db.products.where('barcode').equals(barcode).first();
     if (product) {
-      const newItem = {
-        id: Date.now(),
-        description: product.name + (product.description ? ` - ${product.description}` : ''),
-        quantity: 1,
-        unitPrice: product.price,
-        discount: 0,
-        total: product.price,
-        productId: product.id,
-      };
-      setItems([...items.filter(i => i.description), newItem]);
+      addProductAsItem(product);
       setShowScanner(false);
       showToast(`เพิ่ม "${product.name}" สำเร็จ`);
     } else {
@@ -271,11 +298,18 @@ export default function CreateInvoice() {
   // Taxable base after the bill-level discount
   const netSubtotal = Math.max(0, subtotal - billDiscountNum);
   const vatRate = docType === 'tax_invoice' ? (invoiceSettings.vatRate || 7) : 0;
-  const vatAmount = netSubtotal * vatRate / 100;
-  const grandTotal = netSubtotal + vatAmount;
+  // Two VAT modes (Settings → ใบเสร็จ):
+  //   exclusive (default) — prices are ex-VAT, VAT is added on top
+  //   inclusive           — prices already include VAT, VAT is extracted
+  const vatIncluded = docType === 'tax_invoice' && invoiceSettings.includeVat === true;
+  const vatAmount = vatIncluded
+    ? netSubtotal * vatRate / (100 + vatRate)
+    : netSubtotal * vatRate / 100;
+  const preVatAmount = vatIncluded ? netSubtotal - vatAmount : netSubtotal;
+  const grandTotal = vatIncluded ? netSubtotal : netSubtotal + vatAmount;
   // WHT is computed on the pre-VAT amount (Thai practice) and deducted from the
   // amount the customer actually pays.
-  const whtAmount = whtEnabled ? (netSubtotal * whtRate / 100) : 0;
+  const whtAmount = whtEnabled ? (preVatAmount * whtRate / 100) : 0;
   const netPayable = grandTotal - whtAmount;
   // Amount the customer actually pays (net of WHT), and cash change due.
   const payable = whtEnabled ? netPayable : grandTotal;
@@ -291,6 +325,20 @@ export default function CreateInvoice() {
     }
     if (items.filter(i => i.description).length === 0) {
       showToast('กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ', 'error');
+      return;
+    }
+
+    // A line discount larger than the line amount would make the row (and
+    // potentially the whole document) negative — block with a clear pointer.
+    const badLine = items.find(i => i.description &&
+      (parseFloat(i.discount) || 0) > (parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0));
+    if (badLine) {
+      showToast(`ส่วนลดของ "${badLine.description}" มากกว่ายอดของรายการ — กรุณาแก้ไข`, 'error');
+      return;
+    }
+
+    if (!invoiceNumber.trim()) {
+      showToast('กรุณากรอกเลขที่เอกสาร', 'error');
       return;
     }
 
@@ -316,12 +364,50 @@ export default function CreateInvoice() {
       // Save prepared by name for next time
       await db.settings.put({ key: 'lastPreparedBy', value: preparedBy });
 
-      const deductions = items.filter(i => i.productId);
-      let finalNumber = invoiceNumber;
+      // Delivery notes do NOT touch stock: stock is deducted only by the sales
+      // document (receipt/tax invoice). Issuing ใบส่งของ + ใบเสร็จ for the same
+      // goods previously deducted twice.
+      const deductions = docType === 'delivery' ? [] : items.filter(i => i.productId);
 
-      // Reserve the running number atomically (locked) BEFORE writing the record.
+      // Warn (don't block) when selling more than the tracked stock on hand.
+      if (stockSettings.trackStock !== false && stockSettings.showStockWarning !== false && !editingId) {
+        const shortages = [];
+        for (const item of deductions) {
+          const product = await db.products.get(item.productId);
+          if (product && product.stock != null && (parseFloat(item.quantity) || 0) > product.stock) {
+            shortages.push(`• ${product.name} — สั่ง ${item.quantity} แต่คงเหลือ ${product.stock}`);
+          }
+        }
+        if (shortages.length > 0) {
+          const ok = await appConfirm(
+            `สต็อคไม่พอสำหรับรายการต่อไปนี้:\n${shortages.join('\n')}\nต้องการบันทึกต่อหรือไม่? (สต็อคจะถูกตัดจนเหลือ 0)`,
+            { okLabel: 'บันทึกต่อ' });
+          if (!ok) { setSaving(false); return; }
+        }
+      }
+
+      // Duplicate-number guard — duplicate เลขที่ใบกำกับภาษี is a compliance
+      // violation, so both manual numbers and auto-reserved ones are checked.
+      const existingInvoices = await db.invoices.toArray();
+      let finalNumber = invoiceNumber.trim();
+      let savedId = editingId;
+
       if (!editingId && !numberEdited) {
+        // Reserve atomically; skip numbers already burned by a manually-typed
+        // document so the auto series can never collide with one.
         finalNumber = await reserveDocumentNumber(docType === 'delivery' ? 'delivery' : 'invoice');
+        let guard = 0;
+        while (existingInvoices.some(i => i.invoiceNumber === finalNumber) && guard++ < 500) {
+          finalNumber = await reserveDocumentNumber(docType === 'delivery' ? 'delivery' : 'invoice');
+        }
+      } else {
+        const dup = existingInvoices.some(i =>
+          i.invoiceNumber === finalNumber && i.id !== editingId);
+        if (dup) {
+          showToast(`เลขที่ "${finalNumber}" ถูกใช้ไปแล้ว — กรุณาใช้เลขอื่น`, 'error');
+          setSaving(false);
+          return;
+        }
       }
 
       // Write the invoice + adjust stock together.
@@ -341,6 +427,8 @@ export default function CreateInvoice() {
           subtotal,
           billDiscount: billDiscountNum,
           vatRate,
+          vatIncluded,
+          preVatAmount,
           vatAmount,
           grandTotal,
           whtEnabled,
@@ -365,13 +453,17 @@ export default function CreateInvoice() {
           const { createdAt, ...fields } = invoiceData;
           await db.invoices.update(editingId, { ...fields, updatedAt: new Date().toISOString() });
         } else {
-          await db.invoices.add(invoiceData);
+          savedId = await db.invoices.add(invoiceData);
           // Deduct stock for items with productId
           for (const item of deductions) {
             await updateStock(item.productId, parseFloat(item.quantity) || 0, 'sale', `ใบเสร็จ ${finalNumber}`);
           }
         }
       });
+
+      // Further edits on this screen now UPDATE the saved document instead of
+      // being locked out behind a disabled "บันทึกแล้ว" button.
+      if (!editingId && savedId != null) setEditingId(savedId);
 
       setInvoiceNumber(finalNumber);
 
@@ -445,33 +537,33 @@ export default function CreateInvoice() {
     const filteredItems = items.filter(i => i.description);
     const itemLines = filteredItems.map((item, idx) => `
       <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0">
-        <span>${idx + 1}. ${item.description}</span>
+        <span>${idx + 1}. ${escapeHtml(item.description)}</span>
         <span>${formatNumber(item.total)}</span>
       </div>
       <div style="font-size:10px;color:#666;padding-left:16px">
-        ${item.quantity} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}
+        ${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}
       </div>
     `).join('');
 
     printHtml(`
       <html><head><title>Thermal ${invoiceNumber}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+      <link href="/fonts/fonts.css" rel="stylesheet">
       <style>
         *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
         body{font-family:'Sarabun',sans-serif;width:${w}mm;padding:4mm;font-size:${base}px;color:#000}
         .divider{border-top:1px dashed #333;margin:6px 0}
         @media print{@page{size:${w}mm auto;margin:0}body{padding:2mm}}
       </style></head><body>
-        <div style="text-align:center;font-weight:700;font-size:14px">${company.name || ''}</div>
-        <div style="text-align:center;font-size:10px;color:#666">${company.address || ''}</div>
-        <div style="text-align:center;font-size:10px">Tel: ${company.phone || ''}</div>
+        <div style="text-align:center;font-weight:700;font-size:14px">${escapeHtml(company.name || '')}</div>
+        <div style="text-align:center;font-size:10px;color:#666">${escapeHtml(company.address || '')}</div>
+        <div style="text-align:center;font-size:10px">Tel: ${escapeHtml(company.phone || '')}</div>
         <div class="divider"></div>
         <div style="text-align:center;font-weight:700">${docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน'}</div>
         <div style="display:flex;justify-content:space-between;font-size:11px">
-          <span>เลขที่: ${invoiceNumber}</span>
+          <span>เลขที่: ${escapeHtml(invoiceNumber)}</span>
           <span>${formatDateThai(invoiceDate)}</span>
         </div>
-        <div style="font-size:11px">ลูกค้า: ${selectedCustomer?.name || customerSearch || '-'}</div>
+        <div style="font-size:11px">ลูกค้า: ${escapeHtml(selectedCustomer?.name || customerSearch || '-')}</div>
         <div class="divider"></div>
         ${itemLines}
         <div class="divider"></div>
@@ -479,7 +571,8 @@ export default function CreateInvoice() {
           <span>รวม:</span><span>${formatNumber(subtotal)}</span>
         </div>
         ${billDiscountNum > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>ส่วนลดท้ายบิล:</span><span>-${formatNumber(billDiscountNum)}</span></div>` : ''}
-        ${docType === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>VAT ${vatRate}%:</span><span>${formatNumber(vatAmount)}</span></div>` : ''}
+        ${docType === 'tax_invoice' && vatIncluded ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>มูลค่าก่อน VAT:</span><span>${formatNumber(preVatAmount)}</span></div>` : ''}
+        ${docType === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>VAT ${vatRate}%${vatIncluded ? ' (รวมในราคา)' : ''}:</span><span>${formatNumber(vatAmount)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;border-top:2px solid #000;margin-top:4px;padding-top:4px">
           <span>รวมทั้งสิ้น:</span><span>${formatNumber(grandTotal)} บาท</span>
         </div>
@@ -516,7 +609,7 @@ export default function CreateInvoice() {
       <html>
         <head>
           <title>${invoiceNumber}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+          <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             body { font-family: 'Sarabun', sans-serif; padding: ${cfg.margin}; color: #1e293b; font-size: ${cfg.font}; }
@@ -830,9 +923,15 @@ export default function CreateInvoice() {
                         placeholder="0" min="0" step="0.01"
                         style={{ maxWidth: '120px', textAlign: 'right', padding: '4px 8px' }} />
                     </div>
+                    {docType === 'tax_invoice' && vatIncluded && (
+                      <div className="invoice-summary-row">
+                        <span>มูลค่าสินค้าก่อน VAT</span>
+                        <span className="text-mono">{formatNumber(preVatAmount)}</span>
+                      </div>
+                    )}
                     {docType === 'tax_invoice' && (
                       <div className="invoice-summary-row">
-                        <span>ภาษีมูลค่าเพิ่ม {vatRate}%</span>
+                        <span>ภาษีมูลค่าเพิ่ม {vatRate}%{vatIncluded ? ' (รวมในราคา)' : ''}</span>
                         <span className="text-mono">{formatNumber(vatAmount)}</span>
                       </div>
                     )}
@@ -926,7 +1025,7 @@ export default function CreateInvoice() {
                   </div>
                 )}
                 <p className="form-help" style={{ marginTop: '8px' }}>
-                  คำนวณจากฐานก่อน VAT ({formatNumber(subtotal)} บาท) — ลูกค้าจะออกหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) ให้ภายหลัง
+                  คำนวณจากฐานก่อน VAT หลังหักส่วนลด ({formatNumber(preVatAmount)} บาท) — ลูกค้าจะออกหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) ให้ภายหลัง
                 </p>
               </div>
               {paymentMethod === 'cash' && (
@@ -994,7 +1093,8 @@ export default function CreateInvoice() {
               invoiceNumber, invoiceDate, docType,
               customer: selectedCustomer || { name: customerSearch },
               items: items.filter(i => i.description),
-              subtotal, billDiscount: billDiscountNum, vatRate, vatAmount, grandTotal,
+              subtotal, billDiscount: billDiscountNum,
+              vatRate, vatIncluded, preVatAmount, vatAmount, grandTotal,
               whtEnabled, whtRate, whtAmount, netPayable,
               preparedBy, paymentMethod, paymentStatus,
               cashReceived: cashReceivedNum, changeDue,
@@ -1011,7 +1111,8 @@ export default function CreateInvoice() {
 function InvoicePrintLayout({ data }) {
   const {
     invoiceNumber, invoiceDate, docType,
-    customer, items, subtotal, billDiscount, vatRate, vatAmount, grandTotal,
+    customer, items, subtotal, billDiscount,
+    vatRate, vatIncluded, preVatAmount, vatAmount, grandTotal,
     whtEnabled, whtRate, whtAmount, netPayable,
     preparedBy, paymentMethod, cashReceived, changeDue, notes, company, bank,
   } = data;
@@ -1031,14 +1132,20 @@ function InvoicePrintLayout({ data }) {
             {docType === 'tax_invoice' && <span> · ต้นฉบับ (Original)</span>}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '18px', fontWeight: 700 }}>{company.name || 'บริษัท'}</div>
-          {company.nameEn && <div style={{ fontSize: '11px', color: '#64748b' }}>{company.nameEn}</div>}
-          {company.taxId && (
-            <div style={{ fontSize: '11px', color: '#64748b' }}>
-              เลขประจำตัวผู้เสียภาษี {company.taxId} ({formatBranch(company.branchCode)})
-            </div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', justifyContent: 'flex-end' }}>
+          {company.logo && (
+            <img src={company.logo} alt="logo"
+              style={{ height: '52px', maxWidth: '120px', objectFit: 'contain' }} />
           )}
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '18px', fontWeight: 700 }}>{company.name || 'บริษัท'}</div>
+            {company.nameEn && <div style={{ fontSize: '11px', color: '#64748b' }}>{company.nameEn}</div>}
+            {company.taxId && (
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                เลขประจำตัวผู้เสียภาษี {company.taxId} ({formatBranch(company.branchCode)})
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1140,9 +1247,15 @@ function InvoicePrintLayout({ data }) {
               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>-{formatNumber(billDiscount)}</span>
             </div>
           )}
+          {docType === 'tax_invoice' && vatIncluded && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
+              <span>มูลค่าสินค้าก่อน VAT</span>
+              <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{formatNumber(preVatAmount)}</span>
+            </div>
+          )}
           {docType === 'tax_invoice' && (
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
-              <span>ภาษีมูลค่าเพิ่ม {vatRate}%</span>
+              <span>ภาษีมูลค่าเพิ่ม {vatRate}%{vatIncluded ? ' (รวมในราคา)' : ''}</span>
               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{formatNumber(vatAmount)}</span>
             </div>
           )}

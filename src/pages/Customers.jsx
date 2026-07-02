@@ -4,7 +4,7 @@ import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
 import { db, getNextCustomerCode } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateShort } from '../utils/helpers';
+import { formatNumber, formatDateShort, isValidThaiTaxId } from '../utils/helpers';
 import { Plus, Search, Edit2, Trash2, Eye, Users, Phone, MapPin } from 'lucide-react';
 
 export default function Customers() {
@@ -30,10 +30,12 @@ export default function Customers() {
     const invoices = await db.invoices.toArray();
     setAllInvoices(invoices);
     const enriched = all.map(c => {
-      const custInvoices = invoices.filter(inv => inv.customerId === c.id);
+      // Cancelled documents and delivery notes don't count toward purchases.
+      const custInvoices = invoices.filter(inv =>
+        inv.customerId === c.id && inv.status !== 'cancelled' && inv.type !== 'delivery');
       const totalPurchase = custInvoices.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
       const unpaid = custInvoices.filter(inv => inv.status === 'unpaid')
-        .reduce((s, inv) => s + (inv.grandTotal || 0), 0);
+        .reduce((s, inv) => s + ((inv.netPayable ?? inv.grandTotal) || 0), 0);
       return { ...c, totalPurchase, unpaidAmount: unpaid };
     });
     setCustomers(enriched);
@@ -82,6 +84,14 @@ export default function Customers() {
     if (!form.name.trim()) {
       showToast('กรุณากรอกชื่อลูกค้า', 'error');
       return;
+    }
+    // Soft-validate the tax ID here — catching it at entry beats failing at
+    // the counter when a tax invoice for this customer refuses to save.
+    if (form.taxId && !isValidThaiTaxId(form.taxId)) {
+      const ok = await appConfirm(
+        'เลขประจำตัวผู้เสียภาษีไม่ถูกต้องตามหลักตรวจสอบ (13 หลัก)\nถ้าบันทึกไว้ จะออกใบกำกับภาษีให้ลูกค้ารายนี้ไม่ได้จนกว่าจะแก้ไข\nต้องการบันทึกต่อหรือไม่?',
+        { okLabel: 'บันทึกต่อ' });
+      if (!ok) return;
     }
     try {
       if (editingCustomer) {
@@ -305,8 +315,10 @@ export default function Customers() {
           const invs = allInvoices
             .filter(inv => (viewingCustomer.id && inv.customerId === viewingCustomer.id) || inv.customerName === viewingCustomer.name)
             .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-          const total = invs.reduce((s, i) => s + (i.grandTotal || 0), 0);
-          const unpaid = invs.filter(i => i.status === 'unpaid').reduce((s, i) => s + (i.grandTotal || 0), 0);
+          // Totals count only active sales documents.
+          const active = invs.filter(i => i.status !== 'cancelled' && i.type !== 'delivery');
+          const total = active.reduce((s, i) => s + (i.grandTotal || 0), 0);
+          const unpaid = active.filter(i => i.status === 'unpaid').reduce((s, i) => s + ((i.netPayable ?? i.grandTotal) || 0), 0);
           return (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px', marginBottom: '16px', padding: '12px', background: 'var(--color-gray-50)', borderRadius: 'var(--radius-md)' }}>
@@ -338,8 +350,8 @@ export default function Customers() {
                         <td>{formatDateShort(inv.date)}</td>
                         <td className="text-right text-mono">{formatNumber(inv.grandTotal)}</td>
                         <td className="text-center">
-                          <span className={`badge ${inv.status === 'paid' ? 'badge-success' : 'badge-warning'}`}>
-                            {inv.status === 'paid' ? 'ชำระแล้ว' : 'ค้างชำระ'}
+                          <span className={`badge ${inv.status === 'paid' ? 'badge-success' : inv.status === 'cancelled' ? 'badge-danger' : 'badge-warning'}`}>
+                            {inv.status === 'paid' ? 'ชำระแล้ว' : inv.status === 'cancelled' ? 'ยกเลิก' : 'ค้างชำระ'}
                           </span>
                         </td>
                       </tr>

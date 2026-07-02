@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
-import { db } from '../db/database';
+import { db, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
-import { formatNumber, formatDateShort, formatDateThai, bahtText, formatBranch } from '../utils/helpers';
+import { formatNumber, formatDateShort, formatDateThai, bahtText, formatBranch, escapeHtml } from '../utils/helpers';
 import { printHtml } from '../utils/print';
 import {
   Search, FileText, Eye, Printer, Trash2, Filter,
@@ -32,9 +32,21 @@ export default function InvoiceHistory() {
       if (target) {
         setSelectedInvoice(target);
         setShowPreview(true);
+      } else {
+        // Stale/unknown id (e.g. after a restore) — say so instead of silence.
+        showToast('ไม่พบใบเสร็จที่ระบุ', 'warning');
+        navigate('/invoices', { replace: true });
       }
     }
   }, [id, invoices]);
+
+  // Closing the deep-linked preview must also clear the /invoices/:id URL,
+  // otherwise the same invoice can't be reopened from the list.
+  function closePreview() {
+    setShowPreview(false);
+    setSelectedInvoice(null);
+    if (id) navigate('/invoices', { replace: true });
+  }
 
   async function loadInvoices() {
     const all = await db.invoices.toArray();
@@ -57,27 +69,28 @@ export default function InvoiceHistory() {
     const items = target.items || [];
     const title = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
     const itemLines = items.map((item, idx) => `
-      <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${item.description}</span><span>${formatNumber(item.total)}</span></div>
-      <div style="font-size:10px;color:#666;padding-left:16px">${item.quantity} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${escapeHtml(item.description)}</span><span>${formatNumber(item.total)}</span></div>
+      <div style="font-size:10px;color:#666;padding-left:16px">${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
     `).join('');
     printHtml(`
-      <html><head><title>${target.invoiceNumber}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+      <html><head><title>${escapeHtml(target.invoiceNumber)}</title>
+      <link href="/fonts/fonts.css" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;width:${width}mm;padding:4mm;font-size:${base}px;color:#000}.divider{border-top:1px dashed #333;margin:6px 0}@media print{@page{size:${width}mm auto;margin:0}body{padding:2mm}}</style>
       </head><body>
-        <div style="text-align:center;font-weight:700;font-size:14px">${company.name || ''}</div>
-        <div style="text-align:center;font-size:10px;color:#666">${company.address || ''}</div>
-        <div style="text-align:center;font-size:10px">Tel: ${company.phone || ''}</div>
+        <div style="text-align:center;font-weight:700;font-size:14px">${escapeHtml(company.name || '')}</div>
+        <div style="text-align:center;font-size:10px;color:#666">${escapeHtml(company.address || '')}</div>
+        <div style="text-align:center;font-size:10px">Tel: ${escapeHtml(company.phone || '')}</div>
         <div class="divider"></div>
-        <div style="text-align:center;font-weight:700">${title}</div>
-        <div style="display:flex;justify-content:space-between;font-size:11px"><span>เลขที่: ${target.invoiceNumber}</span><span>${formatDateThai(target.date)}</span></div>
-        <div style="font-size:11px">ลูกค้า: ${target.customerName || '-'}</div>
+        <div style="text-align:center;font-weight:700">${title}${target.status === 'cancelled' ? ' (ยกเลิก)' : ''}</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>เลขที่: ${escapeHtml(target.invoiceNumber)}</span><span>${formatDateThai(target.date)}</span></div>
+        <div style="font-size:11px">ลูกค้า: ${escapeHtml(target.customerName || '-')}</div>
         <div class="divider"></div>
         ${itemLines}
         <div class="divider"></div>
         <div style="display:flex;justify-content:space-between;font-weight:600"><span>รวม:</span><span>${formatNumber(target.subtotal)}</span></div>
         ${target.billDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>ส่วนลดท้ายบิล:</span><span>-${formatNumber(target.billDiscount)}</span></div>` : ''}
-        ${target.type === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>VAT ${target.vatRate}%:</span><span>${formatNumber(target.vatAmount)}</span></div>` : ''}
+        ${target.type === 'tax_invoice' && target.vatIncluded ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>มูลค่าก่อน VAT:</span><span>${formatNumber(target.preVatAmount)}</span></div>` : ''}
+        ${target.type === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>VAT ${target.vatRate}%${target.vatIncluded ? ' (รวมในราคา)' : ''}:</span><span>${formatNumber(target.vatAmount)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;border-top:2px solid #000;margin-top:4px;padding-top:4px"><span>รวมทั้งสิ้น:</span><span>${formatNumber(target.grandTotal)} บาท</span></div>
         ${target.whtEnabled ? `<div style="display:flex;justify-content:space-between;font-size:11px"><span>หัก ณ ที่จ่าย ${target.whtRate}%:</span><span>-${formatNumber(target.whtAmount)}</span></div><div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;border-top:1px solid #000;margin-top:2px;padding-top:2px"><span>ชำระสุทธิ:</span><span>${formatNumber(target.netPayable)} บาท</span></div>` : ''}
         <div style="font-size:10px;text-align:center;color:#666">(${bahtText(target.whtEnabled ? target.netPayable : target.grandTotal)})</div>
@@ -99,10 +112,58 @@ export default function InvoiceHistory() {
     return matchSearch && matchStatus && matchSource;
   });
 
-  const totalAmount = filtered.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
+  // ยอดรวม counts only active documents — cancelled ones are excluded.
+  const totalAmount = filtered
+    .filter(inv => inv.status !== 'cancelled')
+    .reduce((s, inv) => s + (inv.grandTotal || 0), 0);
 
+  // Tax documents are VOIDED, not deleted: the record (and its running
+  // number) stays for the audit trail, and deducted stock is returned.
+  // (Delivery notes never deducted stock, so nothing is returned for them.)
+  async function handleCancel(inv) {
+    const restockable = inv.type !== 'delivery';
+
+    // A credit/debit note referencing this bill keeps adjusting the reports
+    // even after the bill is voided — surface that before cancelling.
+    const linkedNotes = (await db.creditNotes.toArray())
+      .filter(n => String(n.invoiceId) === String(inv.id));
+
+    const lines = [`ต้องการยกเลิกใบเสร็จ ${inv.invoiceNumber} ใช่หรือไม่?`];
+    lines.push(restockable
+      ? 'เอกสารจะถูกเก็บไว้ (สถานะ "ยกเลิก") และสต็อคของรายการจะถูกคืนกลับ'
+      : 'เอกสารจะถูกเก็บไว้ (สถานะ "ยกเลิก") — ใบส่งของไม่เกี่ยวกับสต็อค');
+    if (linkedNotes.length > 0) {
+      lines.push(`⚠️ บิลนี้มีใบลดหนี้/เพิ่มหนี้อ้างอิงอยู่ ${linkedNotes.length} ใบ (${linkedNotes.map(n => n.noteNumber).join(', ')}) — โปรดตรวจสอบ/ลบเอกสารเหล่านั้นด้วย ไม่เช่นนั้นรายงานจะยังถูกปรับยอดต่อ`);
+    }
+    const ok = await appConfirm(lines.join('\n'), { danger: true, okLabel: 'ยกเลิกเอกสาร' });
+    if (!ok) return;
+
+    await db.invoices.update(inv.id, { status: 'cancelled', cancelledAt: new Date().toISOString() });
+    if (restockable) {
+      for (const item of (inv.items || []).filter(i => i.productId)) {
+        await updateStock(item.productId, parseFloat(item.quantity) || 0, 'return',
+          `ยกเลิกใบเสร็จ ${inv.invoiceNumber}`);
+      }
+    }
+
+    // If this bill came from a quotation, unlock it so it can be converted
+    // again (otherwise it stays "แปลงแล้ว" pointing at a voided bill).
+    if (inv.fromQuotation) {
+      const qt = (await db.quotations.toArray())
+        .find(q => q.quotationNumber === inv.fromQuotation && q.status === 'converted');
+      if (qt) {
+        await db.quotations.update(qt.id, { status: 'accepted' });
+        showToast(`ปลดล็อกใบเสนอราคา ${qt.quotationNumber} ให้แปลงใหม่ได้`);
+      }
+    }
+
+    showToast(restockable ? 'ยกเลิกใบเสร็จแล้ว — คืนสต็อคเรียบร้อย' : 'ยกเลิกเอกสารแล้ว');
+    loadInvoices();
+  }
+
+  // Hard delete is allowed only AFTER the document has been cancelled.
   async function handleDelete(inv) {
-    if (await appConfirm(`ต้องการลบใบเสร็จ ${inv.invoiceNumber} ใช่หรือไม่?`, { danger: true, okLabel: 'ลบ' })) {
+    if (await appConfirm(`ต้องการลบใบเสร็จ ${inv.invoiceNumber} ออกถาวรใช่หรือไม่?\n(เอกสารถูกยกเลิกแล้ว — สต็อคถูกคืนไปแล้วตอนยกเลิก)`, { danger: true, okLabel: 'ลบถาวร' })) {
       await db.invoices.delete(inv.id);
       showToast('ลบใบเสร็จสำเร็จ');
       loadInvoices();
@@ -110,6 +171,7 @@ export default function InvoiceHistory() {
   }
 
   async function toggleStatus(inv) {
+    if (inv.status === 'cancelled') return; // voided documents don't toggle
     const newStatus = inv.status === 'paid' ? 'unpaid' : 'paid';
     await db.invoices.update(inv.id, { status: newStatus });
     showToast(`เปลี่ยนสถานะเป็น "${newStatus === 'paid' ? 'ชำระแล้ว' : 'ค้างชำระ'}" สำเร็จ`);
@@ -141,8 +203,8 @@ export default function InvoiceHistory() {
     const itemRows = items.map((item, idx) => `
       <tr>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0">${item.description}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${item.quantity}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
         <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
@@ -163,8 +225,8 @@ export default function InvoiceHistory() {
     let docHtml = `
       <html>
         <head>
-          <title>${docTitle} ${target.invoiceNumber}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+          <title>${docTitle} ${escapeHtml(target.invoiceNumber)}</title>
+          <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
             * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
             body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:#1e293b; font-size:${cfg.font}; line-height:1.6; }
@@ -175,27 +237,30 @@ export default function InvoiceHistory() {
         <body>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #1e293b">
             <div>
-              <div style="font-size:22px;font-weight:800">${docTitle}</div>
+              <div style="font-size:22px;font-weight:800">${docTitle}${target.status === 'cancelled' ? ' <span style="color:#dc2626;font-size:16px">(ยกเลิก)</span>' : ''}</div>
               <div style="font-size:14px;color:#64748b">${docTitleEn}${target.type === 'tax_invoice' ? ' · ต้นฉบับ (Original)' : ''}</div>
             </div>
-            <div style="text-align:right">
-              <div style="font-size:18px;font-weight:700">${company.name || ''}</div>
-              ${company.taxId ? `<div style="font-size:11px;color:#64748b">เลขประจำตัวผู้เสียภาษี ${company.taxId} (${formatBranch(company.branchCode)})</div>` : ''}
+            <div style="display:flex;align-items:flex-start;gap:12px;justify-content:flex-end">
+              ${company.logo ? `<img src="${company.logo}" alt="logo" style="height:52px;max-width:120px;object-fit:contain">` : ''}
+              <div style="text-align:right">
+                <div style="font-size:18px;font-weight:700">${escapeHtml(company.name || '')}</div>
+                ${company.taxId ? `<div style="font-size:11px;color:#64748b">เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
+              </div>
             </div>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
             <div>
               <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px">ลูกค้า:</div>
-              <div style="font-weight:600">${target.customerName || '-'}</div>
-              <div style="font-size:12px;color:#475569">ที่อยู่: ${target.customerAddress || '-'}</div>
-              ${target.customerTaxId ? `<div style="font-size:12px;color:#475569">เลขประจำตัวผู้เสียภาษี: ${target.customerTaxId} (${formatBranch(target.customerBranchCode)})</div>` : ''}
-              ${target.customerPhone ? `<div style="font-size:12px">ผู้ติดต่อ: ${target.customerPhone}</div>` : ''}
+              <div style="font-weight:600">${escapeHtml(target.customerName || '-')}</div>
+              <div style="font-size:12px;color:#475569">ที่อยู่: ${escapeHtml(target.customerAddress || '-')}</div>
+              ${target.customerTaxId ? `<div style="font-size:12px;color:#475569">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(target.customerTaxId)} (${formatBranch(target.customerBranchCode)})</div>` : ''}
+              ${target.customerPhone ? `<div style="font-size:12px">ผู้ติดต่อ: ${escapeHtml(target.customerPhone)}</div>` : ''}
             </div>
             <div style="text-align:right">
               <div style="margin-bottom:4px">
                 <span style="color:#64748b;margin-right:8px">เลขที่:</span>
-                <strong style="font-family:Inter,sans-serif">${target.invoiceNumber}</strong>
+                <strong style="font-family:Inter,sans-serif">${escapeHtml(target.invoiceNumber)}</strong>
               </div>
               <div>
                 <span style="color:#64748b;margin-right:8px">วันที่:</span>
@@ -207,14 +272,14 @@ export default function InvoiceHistory() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px">
             <div>
               <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px">ผู้ออก:</div>
-              <div>${company.name || ''}</div>
-              <div style="font-size:12px">ที่อยู่: ${company.address || ''}</div>
-              ${company.taxId ? `<div style="font-size:12px">เลขประจำตัวผู้เสียภาษี: ${company.taxId} (${formatBranch(company.branchCode)})</div>` : ''}
+              <div>${escapeHtml(company.name || '')}</div>
+              <div style="font-size:12px">ที่อยู่: ${escapeHtml(company.address || '')}</div>
+              ${company.taxId ? `<div style="font-size:12px">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
             </div>
             <div>
-              <div style="font-size:12px">จัดเตรียมโดย: <strong>${target.preparedBy || '-'}</strong></div>
-              <div style="font-size:12px">เบอร์ติดต่อ: ${company.phone || ''}</div>
-              <div style="font-size:12px">อีเมล: ${company.email || ''}</div>
+              <div style="font-size:12px">จัดเตรียมโดย: <strong>${escapeHtml(target.preparedBy || '-')}</strong></div>
+              <div style="font-size:12px">เบอร์ติดต่อ: ${escapeHtml(company.phone || '')}</div>
+              <div style="font-size:12px">อีเมล: ${escapeHtml(company.email || '')}</div>
             </div>
           </div>
 
@@ -237,7 +302,7 @@ export default function InvoiceHistory() {
 
           <div style="display:flex;justify-content:space-between;align-items:flex-start">
             <div style="font-size:12px;color:#64748b;max-width:50%">
-              ${target.notes ? `<div><strong>หมายเหตุ:</strong> ${target.notes}</div>` : ''}
+              ${target.notes ? `<div><strong>หมายเหตุ:</strong> ${escapeHtml(target.notes)}</div>` : ''}
             </div>
             <div style="width:280px">
               <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
@@ -249,9 +314,14 @@ export default function InvoiceHistory() {
                 <span>ส่วนลดท้ายบิล</span>
                 <span style="font-family:Inter,sans-serif;font-weight:600">-${formatNumber(target.billDiscount)}</span>
               </div>` : ''}
+              ${target.type === 'tax_invoice' && target.vatIncluded ? `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
+                <span>มูลค่าสินค้าก่อน VAT</span>
+                <span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.preVatAmount)}</span>
+              </div>` : ''}
               ${target.type === 'tax_invoice' ? `
               <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>ภาษีมูลค่าเพิ่ม ${target.vatRate}%</span>
+                <span>ภาษีมูลค่าเพิ่ม ${target.vatRate}%${target.vatIncluded ? ' (รวมในราคา)' : ''}</span>
                 <span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.vatAmount)}</span>
               </div>` : ''}
               <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #1e293b;font-weight:800;font-size:15px">
@@ -276,11 +346,12 @@ export default function InvoiceHistory() {
           <div style="margin-top:20px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:12px">
             <div style="font-weight:700;margin-bottom:4px">ข้อมูลการชำระเงิน:</div>
             ${target.paymentMethod === 'transfer' && bank.bankName ? `
-              <div>- ชื่อบัญชี: ${bank.accountName}</div>
-              <div>- ธนาคาร ${bank.bankName} เลขที่บัญชี ${bank.accountNumber}</div>
+              <div>- ชื่อบัญชี: ${escapeHtml(bank.accountName)}</div>
+              <div>- ธนาคาร ${escapeHtml(bank.bankName)} เลขที่บัญชี ${escapeHtml(bank.accountNumber)}</div>
             ` : ''}
             ${target.paymentMethod === 'cash' ? '<div>- ชำระด้วยเงินสด</div>' : ''}
             ${target.paymentMethod === 'check' ? '<div>- ชำระด้วยเช็ค</div>' : ''}
+            ${target.paymentMethod === 'credit' ? '<div>- ชำระด้วยบัตรเครดิต</div>' : ''}
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:40px">
@@ -332,6 +403,7 @@ export default function InvoiceHistory() {
             <option value="all">ทุกสถานะ</option>
             <option value="paid">ชำระแล้ว</option>
             <option value="unpaid">ค้างชำระ</option>
+            <option value="cancelled">ยกเลิก</option>
           </select>
           <select
             className="form-select"
@@ -392,12 +464,12 @@ export default function InvoiceHistory() {
                     <td className="text-right text-bold text-mono">{formatNumber(inv.grandTotal)}</td>
                     <td className="text-center">
                       <button
-                        className={`badge ${inv.status === 'paid' ? 'badge-success' : 'badge-warning'}`}
+                        className={`badge ${inv.status === 'paid' ? 'badge-success' : inv.status === 'cancelled' ? 'badge-danger' : 'badge-warning'}`}
                         onClick={() => toggleStatus(inv)}
-                        style={{ cursor: 'pointer', border: 'none' }}
-                        title="คลิกเพื่อเปลี่ยนสถานะ"
+                        style={{ cursor: inv.status === 'cancelled' ? 'default' : 'pointer', border: 'none' }}
+                        title={inv.status === 'cancelled' ? 'เอกสารถูกยกเลิกแล้ว' : 'คลิกเพื่อเปลี่ยนสถานะ'}
                       >
-                        {inv.status === 'paid' ? '✅ ชำระแล้ว' : '⏳ ค้างชำระ'}
+                        {inv.status === 'paid' ? '✅ ชำระแล้ว' : inv.status === 'cancelled' ? '🚫 ยกเลิก' : '⏳ ค้างชำระ'}
                       </button>
                     </td>
                     <td className="text-center">
@@ -405,15 +477,23 @@ export default function InvoiceHistory() {
                         <button className="btn btn-ghost btn-sm" onClick={() => viewInvoice(inv)} title="ดู">
                           <Eye size={16} />
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/create-invoice', { state: { editId: inv.id } })} title="แก้ไข">
-                          <Edit2 size={16} />
-                        </button>
+                        {inv.status !== 'cancelled' && (
+                          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/create-invoice', { state: { editId: inv.id } })} title="แก้ไข">
+                            <Edit2 size={16} />
+                          </button>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => handlePrint(inv)} title="พิมพ์">
                           <Printer size={16} />
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(inv)} title="ลบ">
-                          <Trash2 size={16} />
-                        </button>
+                        {inv.status !== 'cancelled' ? (
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(inv)} title="ยกเลิกเอกสาร (คืนสต็อค)">
+                            <XCircle size={16} />
+                          </button>
+                        ) : (
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(inv)} title="ลบถาวร">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -445,12 +525,12 @@ export default function InvoiceHistory() {
       {selectedInvoice && (
         <Modal
           isOpen={showPreview}
-          onClose={() => { setShowPreview(false); setSelectedInvoice(null); }}
+          onClose={closePreview}
           title={`ใบเสร็จ ${selectedInvoice.invoiceNumber}`}
           size="xl"
           footer={
             <>
-              <button className="btn btn-outline" onClick={() => { setShowPreview(false); setSelectedInvoice(null); }}>ปิด</button>
+              <button className="btn btn-outline" onClick={closePreview}>ปิด</button>
               <select
                 className="form-select"
                 value={paperSize}
@@ -474,7 +554,8 @@ export default function InvoiceHistory() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '12px', borderBottom: '2px solid #1e293b' }}>
               <div>
                 <div style={{ fontSize: '20px', fontWeight: 800 }}>
-                  {selectedInvoice.type === 'tax_invoice' ? 'ใบกำกับภาษี' : 'ใบเสร็จรับเงิน'}
+                  {selectedInvoice.type === 'tax_invoice' ? 'ใบกำกับภาษี' : selectedInvoice.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน'}
+                  {selectedInvoice.status === 'cancelled' && <span style={{ color: '#dc2626', fontSize: '15px' }}> (ยกเลิก)</span>}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
