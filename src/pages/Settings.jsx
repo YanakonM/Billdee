@@ -15,7 +15,7 @@ import { isTauri } from '../db/sqlStore';
 import { checkForUpdate, installUpdate } from '../utils/updater';
 
 export default function Settings() {
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
 
   const [company, setCompany] = useState({
     name: '', nameEn: '', address: '', taxId: '', branchCode: '00000',
@@ -167,7 +167,7 @@ export default function Settings() {
       return;
     }
 
-    if (!window.confirm('การนำเข้าจะเขียนทับข้อมูลเดิมทั้งหมด\nระบบจะ "สำรองข้อมูลปัจจุบันเป็นไฟล์" ให้ก่อนเพื่อความปลอดภัย แล้วจึงนำเข้า\nต้องการดำเนินการต่อหรือไม่?')) {
+    if (!await appConfirm('การนำเข้าจะเขียนทับข้อมูลเดิมทั้งหมด\nระบบจะ "สำรองข้อมูลปัจจุบันเป็นไฟล์" ให้ก่อนเพื่อความปลอดภัย แล้วจึงนำเข้า\nต้องการดำเนินการต่อหรือไม่?', { danger: true, okLabel: 'นำเข้าข้อมูล' })) {
       event.target.value = '';
       return;
     }

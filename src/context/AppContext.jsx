@@ -33,6 +33,23 @@ function appReducer(state, action) {
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
+  // In-app confirm dialog (replaces the native window.confirm, which shows an
+  // ugly "tauri.localhost says" popup in the desktop app).
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const appConfirm = useCallback((message, opts = {}) => new Promise((resolve) => {
+    setConfirmDialog({
+      message,
+      title: opts.title || 'ยืนยันการทำงาน',
+      okLabel: opts.okLabel || 'ตกลง',
+      cancelLabel: opts.cancelLabel || 'ยกเลิก',
+      danger: !!opts.danger,
+      resolve,
+    });
+  }), []);
+  const resolveConfirm = useCallback((result) => {
+    setConfirmDialog(prev => { prev?.resolve(result); return null; });
+  }, []);
+
   // Load language on mount
   useEffect(() => {
     (async () => {
@@ -67,6 +84,9 @@ export function AppProvider({ children }) {
     toggleSidebar,
     closeSidebar,
     showToast,
+    appConfirm,
+    confirmDialog,
+    resolveConfirm,
     setLanguage,
     t,
     dispatch,

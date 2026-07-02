@@ -63,8 +63,16 @@ export default function Reports() {
   const [invoices, setInvoices] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
-  const [period, setPeriod] = useState('month'); // week, month, year
+  const [period, setPeriod] = useState('month'); // week, month, year, custom
   const [activeTab, setActiveTab] = useState('sales');
+  // Year mode: pick any year (this or past). Custom mode: month-to-month range
+  // (can span years) via <input type="month">.
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [customFrom, setCustomFrom] = useState(`${new Date().getFullYear()}-01`);
+  const [customTo, setCustomTo] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   useEffect(() => {
     loadData();
@@ -76,20 +84,39 @@ export default function Reports() {
     setProducts(await db.products.toArray());
   }
 
+  // Years that actually have data (plus the current year), newest first.
+  const availableYears = useMemo(() => {
+    const ys = new Set(
+      invoices.map(i => parseInt((i.date || '').slice(0, 4), 10)).filter(n => n > 2000)
+    );
+    ys.add(new Date().getFullYear());
+    return [...ys].sort((a, b) => b - a);
+  }, [invoices]);
+
   // Calculate period range
   const dateRange = useMemo(() => {
     const now = new Date();
-    let start;
     if (period === 'week') {
-      start = new Date(now);
+      const start = new Date(now);
       start.setDate(start.getDate() - 7);
-    } else if (period === 'month') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else {
-      start = new Date(now.getFullYear(), 0, 1);
+      return { start: start.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
     }
-    return { start: start.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
-  }, [period]);
+    if (period === 'month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: start.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
+    }
+    if (period === 'year') {
+      return { start: `${selectedYear}-01-01`, end: `${selectedYear}-12-31` };
+    }
+    // custom: month-to-month (inclusive), may span years
+    const from = /^\d{4}-\d{2}$/.test(customFrom) ? customFrom : `${now.getFullYear()}-01`;
+    const to = /^\d{4}-\d{2}$/.test(customTo) ? customTo : from;
+    const [ty, tm] = to.split('-').map(Number);
+    const lastDay = new Date(ty, tm, 0).getDate();
+    const range = { start: `${from}-01`, end: `${to}-${String(lastDay).padStart(2, '0')}` };
+    if (range.start > range.end) return { start: range.end.slice(0, 8) + '01', end: range.start };
+    return range;
+  }, [period, selectedYear, customFrom, customTo]);
 
   // Filtered invoices by period
   const periodInvoices = useMemo(() => {
@@ -108,24 +135,29 @@ export default function Reports() {
     return { total, paidAmount, unpaidAmount, count: periodInvoices.length, avgPerInvoice, paidCount: paid.length, unpaidCount: unpaid.length };
   }, [periodInvoices]);
 
-  // Daily sales chart data
+  // Chart data: daily buckets for week/month, monthly buckets for year/custom.
   const dailyData = useMemo(() => {
     const days = {};
     const now = new Date();
-    const daysCount = period === 'week' ? 7 : period === 'month' ? new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() : 12;
 
-    if (period === 'year') {
-      // Monthly for year view
+    if (period === 'year' || period === 'custom') {
       const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-      for (let i = 0; i < 12; i++) {
-        const key = `${now.getFullYear()}-${String(i + 1).padStart(2, '0')}`;
-        days[key] = { label: months[i], value: 0 };
+      const spansYears = dateRange.start.slice(0, 4) !== dateRange.end.slice(0, 4);
+      let [y, m] = dateRange.start.slice(0, 7).split('-').map(Number);
+      const [ey, em] = dateRange.end.slice(0, 7).split('-').map(Number);
+      let guard = 0;
+      while ((y < ey || (y === ey && m <= em)) && guard++ < 120) {
+        const key = `${y}-${String(m).padStart(2, '0')}`;
+        // Append the BE year (พ.ศ. 2 หลัก) when the range spans years.
+        days[key] = { label: spansYears ? `${months[m - 1]}${String((y + 543) % 100)}` : months[m - 1], value: 0 };
+        m++; if (m > 12) { m = 1; y++; }
       }
       periodInvoices.forEach(inv => {
         const key = inv.date?.substring(0, 7);
         if (days[key]) days[key].value += inv.grandTotal || 0;
       });
     } else {
+      const daysCount = period === 'week' ? 7 : new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
       for (let i = daysCount - 1; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
@@ -137,7 +169,7 @@ export default function Reports() {
       });
     }
     return Object.values(days);
-  }, [periodInvoices, period]);
+  }, [periodInvoices, period, dateRange]);
 
   // Top customers
   const topCustomerData = useMemo(() => {
@@ -222,7 +254,12 @@ export default function Reports() {
     showToast('ส่งออก Excel สำเร็จ');
   }
 
-  const periodLabels = { week: 'สัปดาห์นี้', month: 'เดือนนี้', year: 'ปีนี้' };
+  const periodLabels = {
+    week: 'สัปดาห์นี้',
+    month: 'เดือนนี้',
+    year: `ปี ${selectedYear + 543}`,
+    custom: 'ช่วงที่เลือก',
+  };
 
   return (
     <>
@@ -242,17 +279,42 @@ export default function Reports() {
       />
       <div className="page-content">
         {/* Period Selector */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-          {['week', 'month', 'year'].map(p => (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {[['week', 'สัปดาห์นี้'], ['month', 'เดือนนี้'], ['year', 'รายปี'], ['custom', 'กำหนดเอง']].map(([p, label]) => (
             <button
               key={p}
               className={`btn btn-sm ${period === p ? 'btn-primary' : 'btn-outline'}`}
               onClick={() => setPeriod(p)}
             >
               <Calendar size={14} />
-              {periodLabels[p]}
+              {label}
             </button>
           ))}
+
+          {/* Year picker — includes past years that have data */}
+          {period === 'year' && (
+            <select className="form-select" value={selectedYear}
+              onChange={e => setSelectedYear(parseInt(e.target.value, 10))}
+              style={{ width: 'auto', padding: '6px 28px 6px 10px', fontSize: '13px' }}>
+              {availableYears.map(y => (
+                <option key={y} value={y}>ปี {y + 543} ({y})</option>
+              ))}
+            </select>
+          )}
+
+          {/* Custom month-to-month range (can span years) */}
+          {period === 'custom' && (
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px' }}>
+              <span>ตั้งแต่</span>
+              <input type="month" className="form-input" value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                style={{ width: 'auto', padding: '5px 8px', fontSize: '13px' }} />
+              <span>ถึง</span>
+              <input type="month" className="form-input" value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                style={{ width: 'auto', padding: '5px 8px', fontSize: '13px' }} />
+            </div>
+          )}
         </div>
 
         {/* Stats */}
@@ -313,7 +375,7 @@ export default function Reports() {
           <div className="card">
             <div className="card-header">
               <h3 className="card-title">
-                📊 {period === 'year' ? 'ยอดขายรายเดือน' : 'ยอดขายรายวัน'} ({periodLabels[period]})
+                📊 {(period === 'year' || period === 'custom') ? 'ยอดขายรายเดือน' : 'ยอดขายรายวัน'} ({periodLabels[period]})
               </h3>
             </div>
             <div className="card-body">

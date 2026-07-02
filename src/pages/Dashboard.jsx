@@ -140,12 +140,6 @@ export default function Dashboard() {
       <Header
         title="แดชบอร์ด"
         subtitle="ภาพรวมระบบใบกำกับภาษี"
-        actions={
-          <button className="btn btn-primary" onClick={() => navigate('/create-invoice')}>
-            <FilePlus size={18} />
-            สร้างใบเสร็จใหม่
-          </button>
-        }
       />
       <div className="page-content">
         {/* Auto-backup needs a permission click after browser restart */}

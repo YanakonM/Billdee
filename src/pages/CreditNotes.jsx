@@ -4,13 +4,14 @@ import Modal from '../components/Common/Modal';
 import { db, getNextCreditNoteNumber, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort, formatDateThai, getToday, bahtText } from '../utils/helpers';
+import { printHtml } from '../utils/print';
 import {
   FilePlus, Search, Printer, Trash2, FileText, Eye,
   ArrowDownLeft, ArrowUpRight
 } from 'lucide-react';
 
 export default function CreditNotes() {
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
   const [notes, setNotes] = useState([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -113,7 +114,7 @@ export default function CreditNotes() {
   }
 
   async function handleDelete(note) {
-    if (window.confirm(`ต้องการลบ ${note.noteNumber}?`)) {
+    if (await appConfirm(`ต้องการลบ ${note.noteNumber}?`, { danger: true, okLabel: 'ลบ' })) {
       await db.creditNotes.delete(note.id);
       showToast('ลบสำเร็จ');
       loadData();
@@ -121,12 +122,11 @@ export default function CreditNotes() {
   }
 
   function handlePrint(note) {
-    const printWindow = window.open('', '_blank');
     const title = note.type === 'credit' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้';
     const titleEn = note.type === 'credit' ? 'Credit Note' : 'Debit Note';
     const company = note.company || {};
 
-    printWindow.document.write(`<html><head><title>${title} ${note.noteNumber}</title>
+    printHtml(`<html><head><title>${title} ${note.noteNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
     </head><body>
@@ -160,8 +160,6 @@ export default function CreditNotes() {
         <div style="text-align:center"><div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div><div style="font-size:12px;color:#64748b">ผู้อนุมัติ</div></div>
       </div>
     </body></html>`);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
   }
 
   return (
@@ -259,15 +257,16 @@ export default function CreditNotes() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">อ้างอิงใบเสร็จ <span className="required">*</span></label>
+          <label className="form-label">อ้างอิงใบเสร็จ (เฉพาะที่ยังไม่ชำระ) <span className="required">*</span></label>
           <select className="form-select" value={selectedInvoice?.id || ''} onChange={e => selectInvoice(e.target.value)}>
             <option value="">เลือกใบเสร็จ</option>
-            {invoices.map(inv => (
+            {invoices.filter(inv => inv.status === 'unpaid').map(inv => (
               <option key={inv.id} value={inv.id}>
                 {inv.invoiceNumber} — {inv.customerName || 'ไม่ระบุ'} — ฿{formatNumber(inv.grandTotal)}
               </option>
             ))}
           </select>
+          <p className="form-help">บิลที่ชำระครบแล้วจะไม่แสดงในรายการ — การปรับยอดทำได้เฉพาะบิลที่ยังค้างชำระ</p>
         </div>
 
         {selectedInvoice && (

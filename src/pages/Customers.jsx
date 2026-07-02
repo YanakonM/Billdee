@@ -9,7 +9,7 @@ import { Plus, Search, Edit2, Trash2, Eye, Users, Phone, MapPin } from 'lucide-r
 
 export default function Customers() {
   const navigate = useNavigate();
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -18,8 +18,9 @@ export default function Customers() {
   const [viewingCustomer, setViewingCustomer] = useState(null);
   const [form, setForm] = useState({
     code: '', name: '', shopName: '', taxId: '', branchCode: '',
-    address: '', phone: '', email: '', notes: ''
+    address: '', phone: '', email: '', notes: '', isMember: false
   });
+  const [groupFilter, setGroupFilter] = useState('all'); // all | unpaid | clear | member
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -40,16 +41,22 @@ export default function Customers() {
 
   const filtered = customers.filter(c => {
     const q = search.toLowerCase();
-    return !q || 
+    const matchSearch = !q ||
       c.name?.toLowerCase().includes(q) ||
       c.shopName?.toLowerCase().includes(q) ||
       c.phone?.includes(q) ||
       c.code?.toLowerCase().includes(q);
+    const matchGroup =
+      groupFilter === 'all' ||
+      (groupFilter === 'unpaid' && c.unpaidAmount > 0) ||
+      (groupFilter === 'clear' && !(c.unpaidAmount > 0)) ||
+      (groupFilter === 'member' && c.isMember);
+    return matchSearch && matchGroup;
   });
 
   async function openAdd() {
     const code = await getNextCustomerCode();
-    setForm({ code, name: '', shopName: '', taxId: '', branchCode: '', address: '', phone: '', email: '', notes: '' });
+    setForm({ code, name: '', shopName: '', taxId: '', branchCode: '', address: '', phone: '', email: '', notes: '', isMember: false });
     setEditingCustomer(null);
     setShowModal(true);
   }
@@ -65,6 +72,7 @@ export default function Customers() {
       phone: customer.phone || '',
       email: customer.email || '',
       notes: customer.notes || '',
+      isMember: !!customer.isMember,
     });
     setEditingCustomer(customer);
     setShowModal(true);
@@ -91,7 +99,7 @@ export default function Customers() {
   }
 
   async function handleDelete(customer) {
-    if (window.confirm(`ต้องการลบลูกค้า "${customer.name}" ใช่หรือไม่?`)) {
+    if (await appConfirm(`ต้องการลบลูกค้า "${customer.name}" ใช่หรือไม่?`, { danger: true, okLabel: 'ลบ' })) {
       await db.customers.delete(customer.id);
       showToast('ลบลูกค้าสำเร็จ');
       loadCustomers();
@@ -110,9 +118,9 @@ export default function Customers() {
         }
       />
       <div className="page-content">
-        {/* Search */}
-        <div style={{ marginBottom: '20px' }}>
-          <div className="search-wrapper" style={{ maxWidth: '400px' }}>
+        {/* Search + group filter */}
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div className="search-wrapper" style={{ flex: 1, minWidth: '250px', maxWidth: '400px' }}>
             <Search size={18} />
             <input
               type="text"
@@ -122,6 +130,13 @@ export default function Customers() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          <select className="form-select" value={groupFilter}
+            onChange={e => setGroupFilter(e.target.value)} style={{ width: '190px' }}>
+            <option value="all">ลูกค้าทั้งหมด</option>
+            <option value="unpaid">มียอดค้างชำระ</option>
+            <option value="clear">ชำระครบแล้ว</option>
+            <option value="member">สมาชิก (Member)</option>
+          </select>
         </div>
 
         {/* Table */}
@@ -146,7 +161,10 @@ export default function Customers() {
                     <td style={{ fontFamily: 'var(--font-en)', fontWeight: 600, fontSize: '13px', color: 'var(--color-primary-600)' }}>
                       {c.code}
                     </td>
-                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {c.name}
+                      {c.isMember && <span className="badge badge-primary" style={{ marginLeft: '6px', fontSize: '10px' }}>⭐ Member</span>}
+                    </td>
                     <td>{c.shopName || '-'}</td>
                     <td style={{ fontFamily: 'var(--font-en)' }}>{c.phone || '-'}</td>
                     <td className="text-right text-mono">{formatNumber(c.totalPurchase)}</td>
@@ -265,6 +283,13 @@ export default function Customers() {
           <textarea className="form-textarea" value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
             placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" rows={2} />
+        </div>
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={form.isMember}
+              onChange={(e) => setForm({ ...form, isMember: e.target.checked })} />
+            ⭐ ลูกค้าสมาชิก (Member)
+          </label>
         </div>
       </Modal>
 

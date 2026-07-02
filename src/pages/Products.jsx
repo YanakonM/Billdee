@@ -8,7 +8,7 @@ import { formatNumber } from '../utils/helpers';
 import { Plus, Search, Edit2, Trash2, Package, ScanBarcode, AlertTriangle } from 'lucide-react';
 
 export default function Products() {
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
   const [products, setProducts] = useState([]);
   const [lowStockThreshold, setLowStockThreshold] = useState(10);
   const [search, setSearch] = useState('');
@@ -86,7 +86,7 @@ export default function Products() {
   }
 
   async function handleDelete(product) {
-    if (window.confirm(`ต้องการลบสินค้า "${product.name}" ใช่หรือไม่?`)) {
+    if (await appConfirm(`ต้องการลบสินค้า "${product.name}" ใช่หรือไม่?`, { danger: true, okLabel: 'ลบ' })) {
       await db.products.delete(product.id);
       showToast('ลบสินค้าสำเร็จ');
       loadProducts();

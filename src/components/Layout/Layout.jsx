@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { isTauri } from '../../db/sqlStore';
 
 export default function Layout() {
-  const { toasts } = useApp();
+  const { toasts, confirmDialog, resolveConfirm } = useApp();
   const [otherTabOpen, setOtherTabOpen] = useState(false);
 
   // Single-tab guard: hold a web lock for the app's lifetime. If another tab
@@ -64,6 +64,35 @@ export default function Layout() {
               <span>{toast.message}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* In-app confirm dialog (replaces native window.confirm) */}
+      {confirmDialog && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(30,27,58,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => resolveConfirm(false)}>
+          <div style={{
+            background: '#fff', borderRadius: 'var(--radius-lg)', padding: '24px 28px',
+            maxWidth: '420px', width: '90%', boxShadow: 'var(--shadow-xl)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>
+              {confirmDialog.danger ? '⚠️ ' : ''}{confirmDialog.title}
+            </div>
+            <div style={{ fontSize: '14px', color: 'var(--color-gray-600)', marginBottom: '20px', whiteSpace: 'pre-line' }}>
+              {confirmDialog.message}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button className="btn btn-outline" onClick={() => resolveConfirm(false)}>
+                {confirmDialog.cancelLabel}
+              </button>
+              <button className={`btn ${confirmDialog.danger ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => resolveConfirm(true)} autoFocus>
+                {confirmDialog.okLabel}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -7,6 +7,7 @@ import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock, reserveDocu
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId } from '../utils/helpers';
 import { generatePromptPayPayload } from '../utils/promptpay';
+import { printHtml } from '../utils/print';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
@@ -17,7 +18,7 @@ export default function CreateInvoice() {
   const navigate = useNavigate();
   const location = useLocation();
   const editId = location.state?.editId;
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
   const printRef = useRef(null);
 
   // When set, we are editing an existing invoice instead of creating a new one
@@ -394,7 +395,7 @@ export default function CreateInvoice() {
             lastPurchaseAt: purchaseTime,
             ...(!exists.phone && phone ? { phone } : {}),
           });
-        } else if (window.confirm(`ต้องการบันทึก "${name}" เป็นลูกค้าใหม่หรือไม่?`)) {
+        } else if (await appConfirm(`ต้องการบันทึก "${name}" เป็นลูกค้าใหม่หรือไม่?`, { okLabel: 'บันทึกลูกค้า' })) {
           await db.customers.add({
             code: await getNextCustomerCode(),
             name,
@@ -425,6 +426,11 @@ export default function CreateInvoice() {
     const text = `ใบเสร็จ ${invoiceNumber}\nลูกค้า: ${selectedCustomer?.name || customerSearch}\nยอดรวม: ${formatNumber(grandTotal)} บาท\nวันที่: ${formatDateThai(invoiceDate)}`;
     if (navigator.share) {
       navigator.share({ title: `ใบเสร็จ ${invoiceNumber}`, text }).catch(() => {});
+    } else if (window.__TAURI_INTERNALS__ || !window.open) {
+      // Desktop app: window.open is unavailable — copy the text instead.
+      navigator.clipboard?.writeText(text)
+        .then(() => showToast('คัดลอกข้อความแล้ว — วางส่งใน LINE ได้เลย'))
+        .catch(() => showToast('คัดลอกไม่สำเร็จ', 'error'));
     } else {
       // Fallback: open LINE share
       const encoded = encodeURIComponent(text);
@@ -436,7 +442,6 @@ export default function CreateInvoice() {
   function handleThermalPrint(widthMm = 80) {
     const w = widthMm === 58 ? 58 : 80;
     const base = w === 58 ? 10 : 12; // 58mm rolls are tight → smaller base font
-    const printWindow = window.open('', '_blank');
     const filteredItems = items.filter(i => i.description);
     const itemLines = filteredItems.map((item, idx) => `
       <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0">
@@ -448,7 +453,7 @@ export default function CreateInvoice() {
       </div>
     `).join('');
 
-    printWindow.document.write(`
+    printHtml(`
       <html><head><title>Thermal ${invoiceNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
       <style>
@@ -491,8 +496,6 @@ export default function CreateInvoice() {
         <div style="text-align:center;font-size:10px;color:#666">ขอบคุณที่ใช้บริการ</div>
       </body></html>
     `);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
   }
 
   // Full-document print (A4 / A5 / Letter) — uses the rendered preview layout.
@@ -509,8 +512,7 @@ export default function CreateInvoice() {
       A5: { page: 'A5', margin: '8mm', font: '11px' },
       Letter: { page: 'Letter', margin: '10mm', font: '13px' },
     }[size] || { page: 'A4', margin: '10mm', font: '13px' };
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
+    printHtml(`
       <html>
         <head>
           <title>${invoiceNumber}</title>
@@ -529,8 +531,6 @@ export default function CreateInvoice() {
         <body>${bodyHtml}</body>
       </html>
     `);
-    printWindow.document.close();
-    setTimeout(() => { printWindow.print(); }, 500);
   }
 
   // Route to the right printer based on the chosen paper size.
@@ -587,7 +587,7 @@ export default function CreateInvoice() {
       />
 
       <div className="page-content">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', maxWidth: '900px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', maxWidth: '1100px', margin: '0 auto' }}>
 
           {/* Document Type & Date */}
           <div className="card">

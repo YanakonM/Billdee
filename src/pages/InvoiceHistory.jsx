@@ -5,6 +5,7 @@ import Modal from '../components/Common/Modal';
 import { db } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort, formatDateThai, bahtText, formatBranch } from '../utils/helpers';
+import { printHtml } from '../utils/print';
 import {
   Search, FileText, Eye, Printer, Trash2, Filter,
   CheckCircle, Clock, XCircle, Download, Edit2
@@ -13,10 +14,11 @@ import {
 export default function InvoiceHistory() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
   const [invoices, setInvoices] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all'); // all | manual | quotation
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
   const [paperSize, setPaperSize] = useState('A4');
@@ -58,8 +60,7 @@ export default function InvoiceHistory() {
       <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${item.description}</span><span>${formatNumber(item.total)}</span></div>
       <div style="font-size:10px;color:#666;padding-left:16px">${item.quantity} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
     `).join('');
-    const pw = window.open('', '_blank');
-    pw.document.write(`
+    printHtml(`
       <html><head><title>${target.invoiceNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;width:${width}mm;padding:4mm;font-size:${base}px;color:#000}.divider{border-top:1px dashed #333;margin:6px 0}@media print{@page{size:${width}mm auto;margin:0}body{padding:2mm}}</style>
@@ -85,8 +86,6 @@ export default function InvoiceHistory() {
         <div style="text-align:center;font-size:10px;color:#666">ขอบคุณที่ใช้บริการ</div>
       </body></html>
     `);
-    pw.document.close();
-    setTimeout(() => pw.print(), 500);
   }
 
   const filtered = invoices.filter(inv => {
@@ -94,13 +93,16 @@ export default function InvoiceHistory() {
       inv.invoiceNumber?.toLowerCase().includes(search.toLowerCase()) ||
       inv.customerName?.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'all' || inv.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchSource = sourceFilter === 'all' ||
+      (sourceFilter === 'quotation' && !!inv.fromQuotation) ||
+      (sourceFilter === 'manual' && !inv.fromQuotation);
+    return matchSearch && matchStatus && matchSource;
   });
 
   const totalAmount = filtered.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
 
   async function handleDelete(inv) {
-    if (window.confirm(`ต้องการลบใบเสร็จ ${inv.invoiceNumber} ใช่หรือไม่?`)) {
+    if (await appConfirm(`ต้องการลบใบเสร็จ ${inv.invoiceNumber} ใช่หรือไม่?`, { danger: true, okLabel: 'ลบ' })) {
       await db.invoices.delete(inv.id);
       showToast('ลบใบเสร็จสำเร็จ');
       loadInvoices();
@@ -129,8 +131,6 @@ export default function InvoiceHistory() {
       A5: { page: 'A5', margin: '8mm', font: '11px' },
       Letter: { page: 'Letter', margin: '10mm', font: '13px' },
     }[size] || { page: 'A4', margin: '10mm', font: '13px' };
-
-    const printWindow = window.open('', '_blank');
     const items = target.items || [];
     const company = target.company || {};
     const bank = target.bank || {};
@@ -301,9 +301,7 @@ export default function InvoiceHistory() {
       docHtml = docHtml.replace(/<body>([\s\S]*)<\/body>/, (m, inner) =>
         `<body>${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}</body>`);
     }
-    printWindow.document.write(docHtml);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
+    printHtml(docHtml);
   }
 
   return (
@@ -334,6 +332,16 @@ export default function InvoiceHistory() {
             <option value="all">ทุกสถานะ</option>
             <option value="paid">ชำระแล้ว</option>
             <option value="unpaid">ค้างชำระ</option>
+          </select>
+          <select
+            className="form-select"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            style={{ width: '190px' }}
+          >
+            <option value="all">ทุกที่มา</option>
+            <option value="manual">สร้างเอง</option>
+            <option value="quotation">จากใบเสนอราคา</option>
           </select>
         </div>
 
@@ -375,6 +383,11 @@ export default function InvoiceHistory() {
                       <span className={`badge ${inv.type === 'tax_invoice' ? 'badge-primary' : inv.type === 'delivery' ? 'badge-warning' : 'badge-success'}`}>
                         {inv.type === 'tax_invoice' ? 'ใบกำกับภาษี' : inv.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จ'}
                       </span>
+                      {inv.fromQuotation && (
+                        <div style={{ fontSize: '10px', color: 'var(--color-gray-500)', marginTop: '2px' }}>
+                          จาก {inv.fromQuotation}
+                        </div>
+                      )}
                     </td>
                     <td className="text-right text-bold text-mono">{formatNumber(inv.grandTotal)}</td>
                     <td className="text-center">

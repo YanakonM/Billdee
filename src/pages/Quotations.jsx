@@ -6,6 +6,7 @@ import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import { db, getNextQuotationNumber, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText } from '../utils/helpers';
+import { printHtml } from '../utils/print';
 import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
   Printer, Eye, FileText, ArrowRight, Edit2, Clock, CheckCircle, XCircle
@@ -13,7 +14,7 @@ import {
 
 export default function Quotations() {
   const navigate = useNavigate();
-  const { showToast } = useApp();
+  const { showToast, appConfirm } = useApp();
 
   const [quotations, setQuotations] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -284,7 +285,7 @@ export default function Quotations() {
   }
 
   async function handleDelete(qt) {
-    if (window.confirm(`ต้องการลบใบเสนอราคา ${qt.quotationNumber}?`)) {
+    if (await appConfirm(`ต้องการลบใบเสนอราคา ${qt.quotationNumber}?`, { danger: true, okLabel: 'ลบ' })) {
       await db.quotations.delete(qt.id);
       showToast('ลบสำเร็จ');
       loadData();
@@ -292,7 +293,6 @@ export default function Quotations() {
   }
 
   function handlePrint(qt) {
-    const printWindow = window.open('', '_blank');
     const items = qt.items || [];
     const company = qt.company || {};
 
@@ -307,7 +307,7 @@ export default function Quotations() {
       </tr>
     `).join('');
 
-    printWindow.document.write(`<html><head><title>ใบเสนอราคา ${qt.quotationNumber}</title>
+    printHtml(`<html><head><title>ใบเสนอราคา ${qt.quotationNumber}</title>
       <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;padding:15mm;color:#1e293b;font-size:13px;line-height:1.6}table{width:100%;border-collapse:collapse}@media print{@page{size:A4;margin:10mm}body{padding:0}}</style>
     </head><body>
@@ -348,8 +348,6 @@ export default function Quotations() {
         <div style="text-align:center"><div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div><div style="font-size:12px;color:#64748b">ผู้อนุมัติ</div></div>
       </div>
     </body></html>`);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
   }
 
   // === MAIN RENDER ===
@@ -367,7 +365,7 @@ export default function Quotations() {
           }
         />
         <div className="page-content">
-          <div style={{ maxWidth: '900px', display: 'grid', gap: '20px' }}>
+          <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'grid', gap: '20px' }}>
             {/* Header info */}
             <div className="card">
               <div className="card-body">
