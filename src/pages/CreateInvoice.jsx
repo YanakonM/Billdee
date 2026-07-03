@@ -591,19 +591,25 @@ export default function CreateInvoice() {
     `);
   }
 
-  // Full-document print (A4 / A5 / Letter) — uses the rendered preview layout.
+  // Full-document print (A4 / A5 / Letter / 9×5.5" continuous form) — uses the
+  // rendered preview layout.
   function handleFullPrint(size = 'A4') {
     const content = printRef.current;
     if (!content) return;
     // Tax invoices are printed as two pages: ต้นฉบับ (for the buyer) + สำเนา (seller's copy).
+    // On 9×5.5" multi-part carbon forms (dot matrix) the copies come from the
+    // paper itself, so only the original is printed.
     const inner = content.innerHTML;
-    const bodyHtml = docType === 'tax_invoice'
+    const bodyHtml = docType === 'tax_invoice' && size !== '9x5.5'
       ? `${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}`
       : inner;
     const cfg = {
       A4: { page: 'A4', margin: '10mm', font: '13px' },
       A5: { page: 'A5', margin: '8mm', font: '11px' },
       Letter: { page: 'Letter', margin: '10mm', font: '13px' },
+      // Epson LQ-310 ฯลฯ: กระดาษต่อเนื่อง 9×5.5 นิ้ว (ครึ่งแผ่น) — ฟอนต์เล็ก
+      // ขอบแคบ ให้บิลทั่วไปจบในหน้าเดียวพอดีรอยปรุ
+      '9x5.5': { page: '9in 5.5in', margin: '5mm', font: '11px' },
     }[size] || { page: 'A4', margin: '10mm', font: '13px' };
     printHtml(`
       <html>
@@ -657,6 +663,7 @@ export default function CreateInvoice() {
               <option value="A4">A4</option>
               <option value="A5">A5</option>
               <option value="Letter">Letter</option>
+              <option value="9x5.5">ต่อเนื่อง 9×5.5" (หัวเข็ม)</option>
               <option value="80mm">ใบเสร็จย่อ 80mm</option>
               <option value="58mm">ใบเสร็จย่อ 58mm</option>
             </select>
@@ -1078,6 +1085,7 @@ export default function CreateInvoice() {
               <option value="A4">A4</option>
               <option value="A5">A5</option>
               <option value="Letter">Letter</option>
+              <option value="9x5.5">ต่อเนื่อง 9×5.5" (หัวเข็ม)</option>
               <option value="80mm">ใบเสร็จย่อ 80mm</option>
               <option value="58mm">ใบเสร็จย่อ 58mm</option>
             </select>
@@ -1089,6 +1097,7 @@ export default function CreateInvoice() {
       >
         <div ref={printRef}>
           <InvoicePrintLayout
+            compact={paperSize === '9x5.5'}
             data={{
               invoiceNumber, invoiceDate, docType,
               customer: selectedCustomer || { name: customerSearch },
@@ -1107,8 +1116,10 @@ export default function CreateInvoice() {
   );
 }
 
-// Invoice Print Layout (matches the reference image)
-function InvoicePrintLayout({ data }) {
+// Invoice Print Layout (matches the reference image).
+// `compact` = 9×5.5" continuous-form mode (dot matrix): no filler rows, tight
+// margins/paddings, small signature strip — a typical bill fits one half-page.
+function InvoicePrintLayout({ data, compact = false }) {
   const {
     invoiceNumber, invoiceDate, docType,
     customer, items, subtotal, billDiscount,
@@ -1121,13 +1132,18 @@ function InvoicePrintLayout({ data }) {
   const docTitleEn = docType === 'tax_invoice' ? 'Tax Invoice' : docType === 'delivery' ? 'Delivery Note' : 'Receipt';
   const payAmount = whtEnabled ? netPayable : grandTotal;
 
+  // Spacing knobs shared by normal and compact modes.
+  const cellPad = compact ? '3px 6px' : '8px 10px';
+  const sectionGap = compact ? '8px' : '16px';
+  const fillerRows = compact ? 0 : Math.max(0, 5 - items.length);
+
   return (
-    <div className="invoice-paper" style={{ fontSize: '13px', lineHeight: '1.6' }}>
+    <div className="invoice-paper" style={{ fontSize: compact ? '11px' : '13px', lineHeight: compact ? '1.4' : '1.6' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', paddingBottom: '16px', borderBottom: '2px solid #1e293b' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: compact ? '8px' : '20px', paddingBottom: compact ? '6px' : '16px', borderBottom: '2px solid #1e293b' }}>
         <div>
-          <div style={{ fontSize: '22px', fontWeight: 800 }}>{docTitle}</div>
-          <div style={{ fontSize: '14px', color: '#64748b' }}>
+          <div style={{ fontSize: compact ? '16px' : '22px', fontWeight: 800 }}>{docTitle}</div>
+          <div style={{ fontSize: compact ? '11px' : '14px', color: '#64748b' }}>
             {docTitleEn}
             {docType === 'tax_invoice' && <span> · ต้นฉบับ (Original)</span>}
           </div>
@@ -1135,7 +1151,7 @@ function InvoicePrintLayout({ data }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', justifyContent: 'flex-end' }}>
           {company.logo && (
             <img src={company.logo} alt="logo"
-              style={{ height: '52px', maxWidth: '120px', objectFit: 'contain' }} />
+              style={{ height: compact ? '36px' : '52px', maxWidth: '120px', objectFit: 'contain' }} />
           )}
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '18px', fontWeight: 700 }}>{company.name || 'บริษัท'}</div>
@@ -1150,7 +1166,7 @@ function InvoicePrintLayout({ data }) {
       </div>
 
       {/* Customer & Invoice info */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: sectionGap }}>
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>ลูกค้า:</div>
           <div style={{ fontWeight: 600 }}>{customer?.name || '-'}</div>
@@ -1176,7 +1192,7 @@ function InvoicePrintLayout({ data }) {
       </div>
 
       {/* Seller info */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: sectionGap, padding: compact ? '6px 8px' : '12px', background: '#f8fafc', borderRadius: '8px' }}>
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>ผู้ออก:</div>
           <div>{company.name}</div>
@@ -1195,37 +1211,37 @@ function InvoicePrintLayout({ data }) {
       </div>
 
       {/* Items Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '16px 0' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', margin: compact ? '8px 0' : '16px 0' }}>
         <thead>
           <tr>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155', width: '50px' }}>ลำดับที่</th>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155' }}>รายละเอียด</th>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155', width: '70px' }}>จำนวน</th>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155', width: '100px' }}>ราคาต่อหน่วย</th>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155', width: '80px' }}>ส่วนลด</th>
-            <th style={{ background: '#1e293b', color: 'white', padding: '8px 10px', fontSize: '12px', textAlign: 'center', border: '1px solid #334155', width: '110px' }}>รวมเป็นเงิน</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155', width: '50px' }}>ลำดับที่</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155' }}>รายละเอียด</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155', width: '70px' }}>จำนวน</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155', width: '100px' }}>ราคาต่อหน่วย</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155', width: '80px' }}>ส่วนลด</th>
+            <th style={{ background: '#1e293b', color: 'white', padding: cellPad, fontSize: compact ? '10px' : '12px', textAlign: 'center', border: '1px solid #334155', width: '110px' }}>รวมเป็นเงิน</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => (
             <tr key={idx}>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{idx + 1}</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}>{item.description}</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{item.quantity}</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0', textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.unitPrice)}</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0', textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.total)}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0', textAlign: 'center' }}>{idx + 1}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}>{item.description}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0', textAlign: 'center' }}>{item.quantity}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0', textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.unitPrice)}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0', textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.total)}</td>
             </tr>
           ))}
-          {/* Empty rows to fill space */}
-          {Array.from({ length: Math.max(0, 5 - items.length) }).map((_, idx) => (
+          {/* Empty rows to fill space (skipped on compact half-page forms). */}
+          {Array.from({ length: fillerRows }).map((_, idx) => (
             <tr key={`empty-${idx}`}>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}>&nbsp;</td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}></td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}></td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}></td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}></td>
-              <td style={{ padding: '8px 10px', border: '1px solid #e2e8f0' }}></td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}>&nbsp;</td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}></td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}></td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}></td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}></td>
+              <td style={{ padding: cellPad, border: '1px solid #e2e8f0' }}></td>
             </tr>
           ))}
         </tbody>
@@ -1282,7 +1298,7 @@ function InvoicePrintLayout({ data }) {
       </div>
 
       {/* Payment Info */}
-      <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '1px solid #e2e8f0', fontSize: '12px' }}>
+      <div style={{ marginTop: compact ? '8px' : '20px', paddingTop: compact ? '6px' : '12px', borderTop: '1px solid #e2e8f0', fontSize: compact ? '11px' : '12px' }}>
         <div style={{ fontWeight: 700, marginBottom: '4px' }}>ข้อมูลการชำระเงิน:</div>
         {paymentMethod === 'transfer' && bank.bankName && (
           <>
@@ -1303,11 +1319,11 @@ function InvoicePrintLayout({ data }) {
 
       {/* PromptPay QR Code */}
       {paymentMethod === 'transfer' && bank.promptPayId && (
-        <div style={{ marginTop: '16px', textAlign: 'center', padding: '16px', border: '1px dashed #cbd5e1', borderRadius: '8px' }}>
+        <div style={{ marginTop: compact ? '8px' : '16px', textAlign: 'center', padding: compact ? '8px' : '16px', border: '1px dashed #cbd5e1', borderRadius: '8px' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>สแกนจ่ายผ่าน PromptPay</div>
           <QRCodeSVG
             value={(() => { try { return generatePromptPayPayload(bank.promptPayId, payAmount); } catch { return ''; } })()}
-            size={120}
+            size={compact ? 84 : 120}
             level="M"
           />
           <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>PromptPay: {bank.promptPayId}</div>
@@ -1316,14 +1332,14 @@ function InvoicePrintLayout({ data }) {
       )}
 
       {/* Signatures */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', marginTop: '40px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: compact ? '24px' : '48px', marginTop: compact ? '16px' : '40px' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ borderBottom: '1px dotted #94a3b8', paddingBottom: '40px', marginBottom: '8px' }}></div>
+          <div style={{ borderBottom: '1px dotted #94a3b8', paddingBottom: compact ? '18px' : '40px', marginBottom: '8px' }}></div>
           <div style={{ fontSize: '12px', color: '#64748b' }}>อนุมัติโดย</div>
           <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>วันที่ ........./........./.........</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ borderBottom: '1px dotted #94a3b8', paddingBottom: '40px', marginBottom: '8px' }}></div>
+          <div style={{ borderBottom: '1px dotted #94a3b8', paddingBottom: compact ? '18px' : '40px', marginBottom: '8px' }}></div>
           <div style={{ fontSize: '12px', color: '#64748b' }}>รับชำระเงิน</div>
           <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>วันที่ ........./........./.........</div>
         </div>

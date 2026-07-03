@@ -192,7 +192,12 @@ export default function InvoiceHistory() {
       A4: { page: 'A4', margin: '10mm', font: '13px' },
       A5: { page: 'A5', margin: '8mm', font: '11px' },
       Letter: { page: 'Letter', margin: '10mm', font: '13px' },
+      '9x5.5': { page: '9in 5.5in', margin: '5mm', font: '11px' },
     }[size] || { page: 'A4', margin: '10mm', font: '13px' };
+    // Compact = 9×5.5" continuous form (dot matrix): tight cells, no filler
+    // rows, single page (carbon copies come from the multi-part paper).
+    const compact = size === '9x5.5';
+    const cp = compact ? '3px 6px' : '8px 10px';
     const items = target.items || [];
     const company = target.company || {};
     const bank = target.bank || {};
@@ -202,23 +207,23 @@ export default function InvoiceHistory() {
 
     const itemRows = items.map((item, idx) => `
       <tr>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
       </tr>
     `).join('');
 
-    const emptyRows = Array.from({ length: Math.max(0, 5 - items.length) }).map(() => `
+    const emptyRows = Array.from({ length: compact ? 0 : Math.max(0, 5 - items.length) }).map(() => `
       <tr>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0">&nbsp;</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0"></td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0"></td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0"></td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0"></td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid #e2e8f0">&nbsp;</td>
+        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
       </tr>
     `).join('');
 
@@ -229,8 +234,10 @@ export default function InvoiceHistory() {
           <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
             * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:#1e293b; font-size:${cfg.font}; line-height:1.6; }
+            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:#1e293b; font-size:${cfg.font}; line-height:${compact ? '1.35' : '1.6'}; }
             table { width:100%; border-collapse:collapse; }
+            /* Compact mode: collapse the big fixed gaps so a normal bill fits one 9×5.5" page. */
+            ${compact ? 'body>div,table{margin-top:6px !important;margin-bottom:6px !important}' : ''}
             @media print { @page { size:${cfg.page}; margin:${cfg.margin}; } body { padding:0; } }
           </style>
         </head>
@@ -286,12 +293,12 @@ export default function InvoiceHistory() {
           <table style="margin:16px 0">
             <thead>
               <tr>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155;width:50px">ลำดับที่</th>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155">รายละเอียด</th>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155;width:70px">จำนวน</th>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155;width:100px">ราคาต่อหน่วย</th>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155;width:80px">ส่วนลด</th>
-                <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;text-align:center;border:1px solid #334155;width:110px">รวมเป็นเงิน</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:50px">ลำดับที่</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155">รายละเอียด</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:70px">จำนวน</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:100px">ราคาต่อหน่วย</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:80px">ส่วนลด</th>
+                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:110px">รวมเป็นเงิน</th>
               </tr>
             </thead>
             <tbody>
@@ -356,19 +363,20 @@ export default function InvoiceHistory() {
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:40px">
             <div style="text-align:center">
-              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div>
+              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:${compact ? '18px' : '40px'};margin-bottom:8px"></div>
               <div style="font-size:12px;color:#64748b">อนุมัติโดย</div>
             </div>
             <div style="text-align:center">
-              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:40px;margin-bottom:8px"></div>
+              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:${compact ? '18px' : '40px'};margin-bottom:8px"></div>
               <div style="font-size:12px;color:#64748b">รับชำระเงิน</div>
             </div>
           </div>
         </body>
       </html>
     `;
-    // Tax invoices print as ต้นฉบับ + สำเนา (two pages).
-    if (target.type === 'tax_invoice') {
+    // Tax invoices print as ต้นฉบับ + สำเนา (two pages) — except on 9×5.5"
+    // multi-part carbon paper, where the copy is the second ply.
+    if (target.type === 'tax_invoice' && !compact) {
       docHtml = docHtml.replace(/<body>([\s\S]*)<\/body>/, (m, inner) =>
         `<body>${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}</body>`);
     }
@@ -540,6 +548,7 @@ export default function InvoiceHistory() {
                 <option value="A4">A4</option>
                 <option value="A5">A5</option>
                 <option value="Letter">Letter</option>
+                <option value="9x5.5">ต่อเนื่อง 9×5.5" (หัวเข็ม)</option>
                 <option value="80mm">ใบเสร็จย่อ 80mm</option>
                 <option value="58mm">ใบเสร็จย่อ 58mm</option>
               </select>
