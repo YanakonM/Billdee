@@ -7,7 +7,7 @@ import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock, reserveDocu
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId, escapeHtml } from '../utils/helpers';
 import { generatePromptPayPayload } from '../utils/promptpay';
-import { PAPER_SIZE_OPTIONS, getPaperConfig, isDotMatrixPaper, printHtml } from '../utils/print';
+import { PAPER_SIZE_OPTIONS, PRINT_ITEMS_PER_PAGE, getPaperConfig, isDotMatrixPaper, paginatePrintItems, printHtml } from '../utils/print';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
@@ -546,7 +546,7 @@ export default function CreateInvoice() {
     `).join('');
 
     printHtml(`
-      <html><head><title>Thermal ${invoiceNumber}</title>
+      <html><head><title>&nbsp;</title>
       <link href="/fonts/fonts.css" rel="stylesheet">
       <style>
         *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -615,18 +615,39 @@ export default function CreateInvoice() {
     printHtml(`
       <html>
         <head>
-          <title>${invoiceNumber}</title>
+          <title>&nbsp;</title>
           <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: ${dotMatrix ? 'economy' : 'exact'}; print-color-adjust: ${dotMatrix ? 'economy' : 'exact'}; }
-            body { font-family: 'Sarabun', sans-serif; padding: ${cfg.margin}; color: ${dotMatrix ? '#000' : '#1e293b'}; font-size: ${cfg.font}; line-height: ${compact ? '1.35' : '1.55'}; -webkit-font-smoothing: auto; text-rendering: optimizeLegibility; }
+            body { font-family: 'Sarabun', sans-serif; padding: ${cfg.margin}; color: ${dotMatrix ? '#000' : '#1e293b'}; font-size: ${cfg.font}; line-height: ${compact ? '1.24' : dotMatrix ? '1.32' : '1.45'}; -webkit-font-smoothing: auto; text-rendering: optimizeLegibility; }
             table { width: 100%; border-collapse: collapse; }
-            th, td { padding: ${compact ? '3px 6px' : dotMatrix ? '5px 8px' : '8px 10px'}; }
+            th, td { padding: ${compact ? '2px 5px' : dotMatrix ? '3px 6px' : '5px 8px'}; }
             .text-right { text-align: right; }
             .text-center { text-align: center; }
             .bold { font-weight: 700; }
-            .invoice-paper { box-shadow:none !important; border:none !important; border-radius:0 !important; max-width:none !important; padding:0 !important; }
-            ${compact ? 'body>div,table{margin-top:6px !important;margin-bottom:6px !important}' : ''}
+            .invoice-paper {
+              box-shadow:none !important;
+              border:none !important;
+              border-radius:0 !important;
+              max-width:none !important;
+              padding:0 !important;
+              page-break-after:always;
+              break-after:page;
+              page-break-inside:avoid;
+              break-inside:avoid;
+            }
+            .invoice-paper:last-child { page-break-after:auto; break-after:auto; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            ${dotMatrix ? `
+            .invoice-paper [data-print-section="header"] { margin-bottom:6px !important; padding-bottom:5px !important; }
+            .invoice-paper [data-print-section="customer"],
+            .invoice-paper [data-print-section="seller"] { margin-bottom:5px !important; gap:12px !important; }
+            .invoice-paper [data-print-section="seller"] { padding:5px 7px !important; }
+            .invoice-paper [data-print-section="items"] { margin:5px 0 !important; }
+            .invoice-paper [data-print-section="payment"] { margin-top:5px !important; padding-top:4px !important; }
+            .invoice-paper [data-print-section="signatures"] { margin-top:8px !important; gap:20px !important; }
+            .invoice-paper [data-print-line="signature"] { padding-bottom:12px !important; }
+            ` : ''}
             ${dotMatrixCss}
             @media print { @page { size: ${cfg.page}; margin: 0; } body { padding: ${cfg.margin}; } }
           </style>
@@ -1141,11 +1162,28 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
   const docTitle = docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
   const docTitleEn = docType === 'tax_invoice' ? 'Tax Invoice' : docType === 'delivery' ? 'Delivery Note' : 'Receipt';
   const payAmount = whtEnabled ? netPayable : grandTotal;
+  const printPages = paginatePrintItems(items, PRINT_ITEMS_PER_PAGE);
 
   // Spacing knobs shared by normal and compact modes.
-  const cellPad = compact ? '3px 6px' : dotMatrix ? '5px 8px' : '8px 10px';
-  const sectionGap = compact ? '8px' : '16px';
-  const fillerRows = compact ? 0 : Math.max(0, 5 - items.length);
+  const cellPad = compact ? '2px 5px' : dotMatrix ? '3px 6px' : '5px 8px';
+  const sectionGap = compact ? '5px' : dotMatrix ? '6px' : '10px';
+  const fillerRows = 0;
+  const baseFont = compact ? '10px' : dotMatrix ? '10.5px' : '12px';
+  const lineHeight = compact ? '1.22' : dotMatrix ? '1.28' : '1.42';
+  const titleFont = compact ? '15px' : dotMatrix ? '18px' : '21px';
+  const titleEnFont = compact ? '10px' : dotMatrix ? '11px' : '13px';
+  const logoHeight = compact ? '32px' : dotMatrix ? '36px' : '46px';
+  const headerMargin = compact ? '6px' : dotMatrix ? '6px' : '12px';
+  const headerPad = compact ? '5px' : dotMatrix ? '5px' : '10px';
+  const sellerPad = compact ? '5px 7px' : dotMatrix ? '5px 7px' : '8px 10px';
+  const tableMargin = compact ? '5px 0' : dotMatrix ? '5px 0' : '10px 0';
+  const paymentMargin = compact ? '6px' : dotMatrix ? '7px' : '12px';
+  const paymentPad = compact ? '4px' : dotMatrix ? '5px' : '8px';
+  const signatureGap = compact ? '18px' : dotMatrix ? '24px' : '40px';
+  const signatureMargin = compact ? '8px' : dotMatrix ? '12px' : '24px';
+  const signaturePad = compact ? '12px' : dotMatrix ? '16px' : '28px';
+  const summaryPad = dotMatrix ? '3px 0' : '5px 0';
+  const totalPad = dotMatrix ? '5px 0' : '8px 0';
   const ink = dotMatrix ? '#000' : '#1e293b';
   const muted = dotMatrix ? '#000' : '#64748b';
   const subText = dotMatrix ? '#000' : '#475569';
@@ -1155,7 +1193,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
     background: dotMatrix ? 'white' : '#1e293b',
     color: dotMatrix ? '#000' : 'white',
     padding: cellPad,
-    fontSize: compact ? '10px' : '12px',
+    fontSize: compact ? '10px' : dotMatrix ? '10.5px' : '12px',
     textAlign: 'center',
     border: dotMatrix ? '1px solid #000' : '1px solid #334155',
     fontWeight: 700,
@@ -1165,12 +1203,26 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
     : { background: '#f8fafc', borderRadius: '8px' };
 
   return (
-    <div className="invoice-paper" style={{ fontSize: compact ? '11px' : '13px', lineHeight: compact ? '1.4' : '1.6', color: ink }}>
+    <>
+      {printPages.map((pageItems, pageIndex) => {
+        const itemOffset = pageIndex * PRINT_ITEMS_PER_PAGE;
+        return (
+    <div
+      className="invoice-paper"
+      key={`invoice-page-${pageIndex}`}
+      style={{
+        fontSize: baseFont,
+        lineHeight,
+        color: ink,
+        pageBreakAfter: pageIndex === printPages.length - 1 ? 'auto' : 'always',
+        breakAfter: pageIndex === printPages.length - 1 ? 'auto' : 'page',
+      }}
+    >
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: compact ? '8px' : '20px', paddingBottom: compact ? '6px' : '16px', borderBottom: `2px solid ${borderStrong}` }}>
+      <div data-print-section="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: headerMargin, paddingBottom: headerPad, borderBottom: `2px solid ${borderStrong}` }}>
         <div>
-          <div style={{ fontSize: compact ? '16px' : '22px', fontWeight: 800 }}>{docTitle}</div>
-          <div style={{ fontSize: compact ? '11px' : '14px', color: muted }}>
+          <div style={{ fontSize: titleFont, fontWeight: 800 }}>{docTitle}</div>
+          <div style={{ fontSize: titleEnFont, color: muted }}>
             {docTitleEn}
             {docType === 'tax_invoice' && <span> · ต้นฉบับ (Original)</span>}
           </div>
@@ -1178,7 +1230,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', justifyContent: 'flex-end' }}>
           {company.logo && (
             <img src={company.logo} alt="logo"
-              style={{ height: compact ? '36px' : '52px', maxWidth: '120px', objectFit: 'contain' }} />
+              style={{ height: logoHeight, maxWidth: '120px', objectFit: 'contain' }} />
           )}
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '18px', fontWeight: 700 }}>{company.name || 'บริษัท'}</div>
@@ -1193,7 +1245,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       </div>
 
       {/* Customer & Invoice info */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: sectionGap }}>
+      <div data-print-section="customer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: dotMatrix || compact ? '12px' : '20px', marginBottom: sectionGap }}>
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: muted, marginBottom: '4px' }}>ลูกค้า:</div>
           <div style={{ fontWeight: 600 }}>{customer?.name || '-'}</div>
@@ -1215,11 +1267,16 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
             <span style={{ color: muted, marginRight: '8px' }}>วันที่:</span>
             <strong>{formatDateThai(invoiceDate)}</strong>
           </div>
+          {printPages.length > 1 && (
+            <div style={{ fontSize: '11px', color: muted }}>
+              หน้า {pageIndex + 1}/{printPages.length}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Seller info */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: sectionGap, padding: compact ? '6px 8px' : '12px', ...sellerPanelStyle }}>
+      <div data-print-section="seller" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: dotMatrix || compact ? '12px' : '20px', marginBottom: sectionGap, padding: sellerPad, ...sellerPanelStyle }}>
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: muted, marginBottom: '4px' }}>ผู้ออก:</div>
           <div>{company.name}</div>
@@ -1238,7 +1295,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       </div>
 
       {/* Items Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: compact ? '8px 0' : '16px 0' }}>
+      <table data-print-section="items" style={{ width: '100%', borderCollapse: 'collapse', margin: tableMargin }}>
         <thead>
           <tr>
             <th style={{ ...tableHeaderStyle, width: '50px' }}>ลำดับที่</th>
@@ -1250,9 +1307,9 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
           </tr>
         </thead>
         <tbody>
-          {items.map((item, idx) => (
+          {pageItems.map((item, idx) => (
             <tr key={idx}>
-              <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{idx + 1}</td>
+              <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{itemOffset + idx + 1}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}>{item.description}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{item.quantity}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.unitPrice)}</td>
@@ -1275,44 +1332,44 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       </table>
 
       {/* Summary */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div data-print-section="summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ fontSize: '12px', color: muted, maxWidth: '50%' }}>
           {notes && <div><strong>หมายเหตุ:</strong> {notes}</div>}
         </div>
         <div style={{ width: '280px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${borderLight}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: summaryPad, borderBottom: `1px solid ${borderLight}` }}>
             <span>ราคารวมสินค้า (บาท)</span>
             <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{formatNumber(subtotal)}</span>
           </div>
           {billDiscount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${borderLight}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: summaryPad, borderBottom: `1px solid ${borderLight}` }}>
               <span>ส่วนลดท้ายบิล</span>
               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>-{formatNumber(billDiscount)}</span>
             </div>
           )}
           {docType === 'tax_invoice' && vatIncluded && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${borderLight}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: summaryPad, borderBottom: `1px solid ${borderLight}` }}>
               <span>มูลค่าสินค้าก่อน VAT</span>
               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{formatNumber(preVatAmount)}</span>
             </div>
           )}
           {docType === 'tax_invoice' && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${borderLight}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: summaryPad, borderBottom: `1px solid ${borderLight}` }}>
               <span>ภาษีมูลค่าเพิ่ม {vatRate}%{vatIncluded ? ' (รวมในราคา)' : ''}</span>
               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{formatNumber(vatAmount)}</span>
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${borderStrong}`, fontWeight: 800, fontSize: '15px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: totalPad, borderTop: `2px solid ${borderStrong}`, fontWeight: 800, fontSize: dotMatrix || compact ? '14px' : '15px' }}>
             <span>จำนวนเงินรวมทั้งสิ้น</span>
             <span style={{ fontFamily: 'Inter, sans-serif' }}>{formatNumber(grandTotal)}</span>
           </div>
           {whtEnabled && (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${borderLight}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: summaryPad, borderBottom: `1px solid ${borderLight}` }}>
                 <span>หัก ณ ที่จ่าย {whtRate}%</span>
                 <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>-{formatNumber(whtAmount)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${borderStrong}`, fontWeight: 800, fontSize: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: totalPad, borderTop: `2px solid ${borderStrong}`, fontWeight: 800, fontSize: dotMatrix || compact ? '14px' : '15px' }}>
                 <span>ยอดชำระสุทธิ</span>
                 <span style={{ fontFamily: 'Inter, sans-serif' }}>{formatNumber(netPayable)}</span>
               </div>
@@ -1325,7 +1382,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       </div>
 
       {/* Payment Info */}
-      <div style={{ marginTop: compact ? '8px' : '20px', paddingTop: compact ? '6px' : '12px', borderTop: `1px solid ${borderLight}`, fontSize: compact ? '11px' : '12px' }}>
+      <div data-print-section="payment" style={{ marginTop: paymentMargin, paddingTop: paymentPad, borderTop: `1px solid ${borderLight}`, fontSize: compact || dotMatrix ? '11px' : '12px' }}>
         <div style={{ fontWeight: 700, marginBottom: '4px' }}>ข้อมูลการชำระเงิน:</div>
         {paymentMethod === 'transfer' && bank.bankName && (
           <>
@@ -1346,7 +1403,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
 
       {/* PromptPay QR Code */}
       {paymentMethod === 'transfer' && bank.promptPayId && (
-        <div style={{ marginTop: compact ? '8px' : '16px', textAlign: 'center', padding: compact ? '8px' : '16px', border: `1px dashed ${borderLight}`, borderRadius: dotMatrix ? 0 : '8px' }}>
+        <div style={{ marginTop: compact ? '8px' : dotMatrix ? '7px' : '16px', textAlign: 'center', padding: compact || dotMatrix ? '8px' : '16px', border: `1px dashed ${borderLight}`, borderRadius: dotMatrix ? 0 : '8px' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>สแกนจ่ายผ่าน PromptPay</div>
           <QRCodeSVG
             value={(() => { try { return generatePromptPayPayload(bank.promptPayId, payAmount); } catch { return ''; } })()}
@@ -1359,18 +1416,21 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       )}
 
       {/* Signatures */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: compact ? '24px' : '48px', marginTop: compact ? '16px' : '40px' }}>
+      <div data-print-section="signatures" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: signatureGap, marginTop: signatureMargin }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ borderBottom: `1px dotted ${dotMatrix ? '#000' : '#94a3b8'}`, paddingBottom: compact ? '18px' : '40px', marginBottom: '8px' }}></div>
+          <div data-print-line="signature" style={{ borderBottom: `1px dotted ${dotMatrix ? '#000' : '#94a3b8'}`, paddingBottom: signaturePad, marginBottom: dotMatrix || compact ? '4px' : '8px' }}></div>
           <div style={{ fontSize: '12px', color: muted }}>อนุมัติโดย</div>
           <div style={{ fontSize: '11px', color: muted, marginTop: '4px' }}>วันที่ ........./........./.........</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ borderBottom: `1px dotted ${dotMatrix ? '#000' : '#94a3b8'}`, paddingBottom: compact ? '18px' : '40px', marginBottom: '8px' }}></div>
+          <div data-print-line="signature" style={{ borderBottom: `1px dotted ${dotMatrix ? '#000' : '#94a3b8'}`, paddingBottom: signaturePad, marginBottom: dotMatrix || compact ? '4px' : '8px' }}></div>
           <div style={{ fontSize: '12px', color: muted }}>รับชำระเงิน</div>
           <div style={{ fontSize: '11px', color: muted, marginTop: '4px' }}>วันที่ ........./........./.........</div>
         </div>
       </div>
     </div>
+        );
+      })}
+    </>
   );
 }

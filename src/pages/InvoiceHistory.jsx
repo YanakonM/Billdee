@@ -5,7 +5,7 @@ import Modal from '../components/Common/Modal';
 import { db, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort, formatDateThai, bahtText, formatBranch, escapeHtml } from '../utils/helpers';
-import { PAPER_SIZE_OPTIONS, getPaperConfig, isDotMatrixPaper, printHtml } from '../utils/print';
+import { PAPER_SIZE_OPTIONS, PRINT_ITEMS_PER_PAGE, getPaperConfig, isDotMatrixPaper, paginatePrintItems, printHtml } from '../utils/print';
 import {
   Search, FileText, Eye, Printer, Trash2, Filter,
   CheckCircle, Clock, XCircle, Download, Edit2
@@ -73,7 +73,7 @@ export default function InvoiceHistory() {
       <div style="font-size:10px;color:#666;padding-left:16px">${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
     `).join('');
     printHtml(`
-      <html><head><title>${escapeHtml(target.invoiceNumber)}</title>
+      <html><head><title>&nbsp;</title>
       <link href="/fonts/fonts.css" rel="stylesheet">
       <style>*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:'Sarabun',sans-serif;width:${width}mm;padding:4mm;font-size:${base}px;color:#000}.divider{border-top:1px dashed #333;margin:6px 0}@media print{@page{size:${width}mm auto;margin:0}body{padding:2mm}}</style>
       </head><body>
@@ -200,41 +200,49 @@ export default function InvoiceHistory() {
 
     const cfg = getPaperConfig(size);
     const dotMatrix = isDotMatrixPaper(size);
-    // Compact = 9×5.5" continuous form (dot matrix): tight cells, no filler
-    // rows, single page (carbon copies come from the multi-part paper).
     const compact = size === '9x5.5';
-    const cp = compact ? '3px 6px' : dotMatrix ? '5px 8px' : '8px 10px';
     const items = target.items || [];
     const company = target.company || {};
     const bank = target.bank || {};
+    const pages = paginatePrintItems(items, PRINT_ITEMS_PER_PAGE);
+    const cp = compact ? '2px 5px' : dotMatrix ? '3px 6px' : '5px 8px';
+    const baseFont = compact ? '10px' : dotMatrix ? '10.5px' : cfg.font;
+    const lineHeight = compact ? '1.22' : dotMatrix ? '1.28' : '1.42';
+    const titleFont = compact ? '15px' : dotMatrix ? '18px' : '21px';
+    const titleEnFont = compact ? '10px' : dotMatrix ? '11px' : '13px';
+    const headerMargin = compact || dotMatrix ? '6px' : '12px';
+    const sectionGap = compact || dotMatrix ? '6px' : '10px';
+    const panelPad = compact || dotMatrix ? '5px 7px' : '8px 10px';
+    const tableMargin = compact || dotMatrix ? '5px 0' : '10px 0';
+    const summaryPad = dotMatrix ? '3px 0' : '5px 0';
+    const totalPad = dotMatrix ? '5px 0' : '8px 0';
+    const signaturePad = compact ? '12px' : dotMatrix ? '16px' : '28px';
+    const signatureGap = compact ? '18px' : dotMatrix ? '24px' : '40px';
+    const ink = dotMatrix ? '#000' : '#1e293b';
+    const muted = dotMatrix ? '#000' : '#64748b';
+    const subText = dotMatrix ? '#000' : '#475569';
+    const borderStrong = dotMatrix ? '#000' : '#1e293b';
+    const borderLight = dotMatrix ? '#777' : '#e2e8f0';
+    const thBg = dotMatrix ? '#fff' : '#1e293b';
+    const thColor = dotMatrix ? '#000' : '#fff';
+    const thBorder = dotMatrix ? '#000' : '#334155';
 
     const docTitle = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
     const docTitleEn = target.type === 'tax_invoice' ? 'Tax Invoice' : target.type === 'delivery' ? 'Delivery Note' : 'Receipt';
 
-    const itemRows = items.map((item, idx) => `
+    const renderRows = (pageItems, pageIndex) => pageItems.map((item, idx) => `
       <tr>
-        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0;text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
-      </tr>
-    `).join('');
-
-    const emptyRows = Array.from({ length: compact ? 0 : Math.max(0, 5 - items.length) }).map(() => `
-      <tr>
-        <td style="padding:${cp};border:1px solid #e2e8f0">&nbsp;</td>
-        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
-        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
-        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
-        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
-        <td style="padding:${cp};border:1px solid #e2e8f0"></td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:center">${(pageIndex * PRINT_ITEMS_PER_PAGE) + idx + 1}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight}">${escapeHtml(item.description)}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:center">${escapeHtml(item.quantity)}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
       </tr>
     `).join('');
 
     const dotMatrixCss = dotMatrix ? `
-              body { color:#000 !important; font-weight:500; }
+              body, .invoice-paper { color:#000 !important; font-weight:500; }
               div, span, td, th, strong { color:#000 !important; }
               [style*="background:#f8fafc"],
               [style*="background: #f8fafc"] { background:#fff !important; border:1px solid #777 !important; border-radius:0 !important; }
@@ -242,160 +250,136 @@ export default function InvoiceHistory() {
               td { border-color:#777 !important; }
             ` : '';
 
-    let docHtml = `
+    const renderPage = (pageItems, pageIndex, copy = false) => `
+      <section class="invoice-paper">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:${headerMargin};padding-bottom:5px;border-bottom:2px solid ${borderStrong}">
+          <div>
+            <div style="font-size:${titleFont};font-weight:800">${docTitle}${target.status === 'cancelled' ? ' <span style="color:#dc2626;font-size:16px">(ยกเลิก)</span>' : ''}</div>
+            <div style="font-size:${titleEnFont};color:${muted}">${docTitleEn}${target.type === 'tax_invoice' ? (copy ? ' · สำเนา (Copy)' : ' · ต้นฉบับ (Original)') : ''}</div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:12px;justify-content:flex-end">
+            ${company.logo ? `<img src="${escapeHtml(company.logo)}" alt="logo" style="height:${compact ? '32px' : dotMatrix ? '36px' : '46px'};max-width:120px;object-fit:contain">` : ''}
+            <div style="text-align:right">
+              <div style="font-size:18px;font-weight:700">${escapeHtml(company.name || '')}</div>
+              ${company.taxId ? `<div style="font-size:11px;color:${muted}">เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:${compact || dotMatrix ? '12px' : '20px'};margin-bottom:${sectionGap}">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:${muted};margin-bottom:4px">ลูกค้า:</div>
+            <div style="font-weight:600">${escapeHtml(target.customerName || '-')}</div>
+            <div style="font-size:12px;color:${subText}">ที่อยู่: ${escapeHtml(target.customerAddress || '-')}</div>
+            ${target.customerTaxId ? `<div style="font-size:12px;color:${subText}">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(target.customerTaxId)} (${formatBranch(target.customerBranchCode)})</div>` : ''}
+            ${target.customerPhone ? `<div style="font-size:12px">ผู้ติดต่อ: ${escapeHtml(target.customerPhone)}</div>` : ''}
+          </div>
+          <div style="text-align:right">
+            <div style="margin-bottom:4px"><span style="color:${muted};margin-right:8px">เลขที่:</span><strong style="font-family:Inter,sans-serif">${escapeHtml(target.invoiceNumber)}</strong></div>
+            <div style="margin-bottom:4px"><span style="color:${muted};margin-right:8px">วันที่:</span><strong>${formatDateThai(target.date)}</strong></div>
+            ${pages.length > 1 ? `<div style="font-size:11px;color:${muted}">หน้า ${pageIndex + 1}/${pages.length}</div>` : ''}
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:${compact || dotMatrix ? '12px' : '20px'};margin-bottom:${sectionGap};padding:${panelPad};background:#f8fafc;border-radius:${dotMatrix ? '0' : '8px'}">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:${muted};margin-bottom:4px">ผู้ออก:</div>
+            <div>${escapeHtml(company.name || '')}</div>
+            <div style="font-size:12px">ที่อยู่: ${escapeHtml(company.address || '')}</div>
+            ${company.taxId ? `<div style="font-size:12px">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
+          </div>
+          <div>
+            <div style="font-size:12px">จัดเตรียมโดย: <strong>${escapeHtml(target.preparedBy || '-')}</strong></div>
+            <div style="font-size:12px">เบอร์ติดต่อ: ${escapeHtml(company.phone || '')}</div>
+            <div style="font-size:12px">อีเมล: ${escapeHtml(company.email || '')}</div>
+          </div>
+        </div>
+
+        <table style="margin:${tableMargin}">
+          <thead>
+            <tr>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:50px">ลำดับที่</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder}">รายละเอียด</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:70px">จำนวน</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:100px">ราคาต่อหน่วย</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:80px">ส่วนลด</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:110px">รวมเป็นเงิน</th>
+            </tr>
+          </thead>
+          <tbody>${renderRows(pageItems, pageIndex)}</tbody>
+        </table>
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="font-size:12px;color:${muted};max-width:50%">
+            ${target.notes ? `<div><strong>หมายเหตุ:</strong> ${escapeHtml(target.notes)}</div>` : ''}
+          </div>
+          <div style="width:280px">
+            <div style="display:flex;justify-content:space-between;padding:${summaryPad};border-bottom:1px solid ${borderLight}"><span>ราคารวมสินค้า (บาท)</span><span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.subtotal)}</span></div>
+            ${target.billDiscount > 0 ? `<div style="display:flex;justify-content:space-between;padding:${summaryPad};border-bottom:1px solid ${borderLight}"><span>ส่วนลดท้ายบิล</span><span style="font-family:Inter,sans-serif;font-weight:600">-${formatNumber(target.billDiscount)}</span></div>` : ''}
+            ${target.type === 'tax_invoice' && target.vatIncluded ? `<div style="display:flex;justify-content:space-between;padding:${summaryPad};border-bottom:1px solid ${borderLight}"><span>มูลค่าสินค้าก่อน VAT</span><span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.preVatAmount)}</span></div>` : ''}
+            ${target.type === 'tax_invoice' ? `<div style="display:flex;justify-content:space-between;padding:${summaryPad};border-bottom:1px solid ${borderLight}"><span>ภาษีมูลค่าเพิ่ม ${target.vatRate}%${target.vatIncluded ? ' (รวมในราคา)' : ''}</span><span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.vatAmount)}</span></div>` : ''}
+            <div style="display:flex;justify-content:space-between;padding:${totalPad};border-top:2px solid ${borderStrong};font-weight:800;font-size:${compact || dotMatrix ? '14px' : '15px'}"><span>จำนวนเงินรวมทั้งสิ้น</span><span style="font-family:Inter,sans-serif">${formatNumber(target.grandTotal)}</span></div>
+            ${target.whtEnabled ? `<div style="display:flex;justify-content:space-between;padding:${summaryPad};border-bottom:1px solid ${borderLight}"><span>หัก ณ ที่จ่าย ${target.whtRate}%</span><span style="font-family:Inter,sans-serif;font-weight:600">-${formatNumber(target.whtAmount)}</span></div><div style="display:flex;justify-content:space-between;padding:${totalPad};border-top:2px solid ${borderStrong};font-weight:800;font-size:${compact || dotMatrix ? '14px' : '15px'}"><span>ยอดชำระสุทธิ</span><span style="font-family:Inter,sans-serif">${formatNumber(target.netPayable)}</span></div>` : ''}
+            <div style="font-size:12px;color:${muted};text-align:right">(${bahtText(target.whtEnabled ? target.netPayable : target.grandTotal)})</div>
+          </div>
+        </div>
+
+        <div style="margin-top:${compact || dotMatrix ? '7px' : '12px'};padding-top:${compact || dotMatrix ? '5px' : '8px'};border-top:1px solid ${borderLight};font-size:${compact || dotMatrix ? '11px' : '12px'}">
+          <div style="font-weight:700;margin-bottom:4px">ข้อมูลการชำระเงิน:</div>
+          ${target.paymentMethod === 'transfer' && bank.bankName ? `<div>- ชื่อบัญชี: ${escapeHtml(bank.accountName)}</div><div>- ธนาคาร ${escapeHtml(bank.bankName)} เลขที่บัญชี ${escapeHtml(bank.accountNumber)}</div>` : ''}
+          ${target.paymentMethod === 'cash' ? '<div>- ชำระด้วยเงินสด</div>' : ''}
+          ${target.paymentMethod === 'check' ? '<div>- ชำระด้วยเช็ค</div>' : ''}
+          ${target.paymentMethod === 'credit' ? '<div>- ชำระด้วยบัตรเครดิต</div>' : ''}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:${signatureGap};margin-top:${compact ? '8px' : dotMatrix ? '12px' : '24px'}">
+          <div style="text-align:center">
+            <div style="border-bottom:1px dotted ${dotMatrix ? '#000' : '#94a3b8'};padding-bottom:${signaturePad};margin-bottom:${compact || dotMatrix ? '4px' : '8px'}"></div>
+            <div style="font-size:12px;color:${muted}">อนุมัติโดย</div>
+            <div style="font-size:11px;color:${muted};margin-top:4px">วันที่ ........./........./.........</div>
+          </div>
+          <div style="text-align:center">
+            <div style="border-bottom:1px dotted ${dotMatrix ? '#000' : '#94a3b8'};padding-bottom:${signaturePad};margin-bottom:${compact || dotMatrix ? '4px' : '8px'}"></div>
+            <div style="font-size:12px;color:${muted}">รับชำระเงิน</div>
+            <div style="font-size:11px;color:${muted};margin-top:4px">วันที่ ........./........./.........</div>
+          </div>
+        </div>
+      </section>
+    `;
+
+    const originalPages = pages.map((pageItems, pageIndex) => renderPage(pageItems, pageIndex, false)).join('');
+    const copyPages = target.type === 'tax_invoice' && !dotMatrix
+      ? pages.map((pageItems, pageIndex) => renderPage(pageItems, pageIndex, true)).join('')
+      : '';
+
+    const docHtml = `
       <html>
         <head>
-          <title>${docTitle} ${escapeHtml(target.invoiceNumber)}</title>
+          <title>&nbsp;</title>
           <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
             * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:${dotMatrix ? 'economy' : 'exact'}; print-color-adjust:${dotMatrix ? 'economy' : 'exact'}; }
-            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:${dotMatrix ? '#000' : '#1e293b'}; font-size:${cfg.font}; line-height:${compact ? '1.35' : '1.55'}; -webkit-font-smoothing:auto; text-rendering:optimizeLegibility; }
+            body {
+              font-family:'Sarabun',sans-serif;
+              padding:${cfg.margin};
+              color:${ink};
+              font-size:${baseFont};
+              line-height:${lineHeight};
+              -webkit-font-smoothing:auto;
+              text-rendering:optimizeLegibility;
+            }
             table { width:100%; border-collapse:collapse; }
-            /* Compact mode: collapse the big fixed gaps so a normal bill fits one 9×5.5" page. */
-            ${compact ? 'body>div,table{margin-top:6px !important;margin-bottom:6px !important}' : ''}
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            .invoice-paper { page-break-after:always; break-after:page; page-break-inside:avoid; break-inside:avoid; }
+            .invoice-paper:last-child { page-break-after:auto; break-after:auto; }
             ${dotMatrixCss}
             @media print { @page { size:${cfg.page}; margin:0; } body { padding:${cfg.margin}; } }
           </style>
         </head>
-        <body>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #1e293b">
-            <div>
-              <div style="font-size:22px;font-weight:800">${docTitle}${target.status === 'cancelled' ? ' <span style="color:#dc2626;font-size:16px">(ยกเลิก)</span>' : ''}</div>
-              <div style="font-size:14px;color:#64748b">${docTitleEn}${target.type === 'tax_invoice' ? ' · ต้นฉบับ (Original)' : ''}</div>
-            </div>
-            <div style="display:flex;align-items:flex-start;gap:12px;justify-content:flex-end">
-              ${company.logo ? `<img src="${company.logo}" alt="logo" style="height:52px;max-width:120px;object-fit:contain">` : ''}
-              <div style="text-align:right">
-                <div style="font-size:18px;font-weight:700">${escapeHtml(company.name || '')}</div>
-                ${company.taxId ? `<div style="font-size:11px;color:#64748b">เลขประจำตัวผู้เสียภาษี ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
-              </div>
-            </div>
-          </div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
-            <div>
-              <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px">ลูกค้า:</div>
-              <div style="font-weight:600">${escapeHtml(target.customerName || '-')}</div>
-              <div style="font-size:12px;color:#475569">ที่อยู่: ${escapeHtml(target.customerAddress || '-')}</div>
-              ${target.customerTaxId ? `<div style="font-size:12px;color:#475569">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(target.customerTaxId)} (${formatBranch(target.customerBranchCode)})</div>` : ''}
-              ${target.customerPhone ? `<div style="font-size:12px">ผู้ติดต่อ: ${escapeHtml(target.customerPhone)}</div>` : ''}
-            </div>
-            <div style="text-align:right">
-              <div style="margin-bottom:4px">
-                <span style="color:#64748b;margin-right:8px">เลขที่:</span>
-                <strong style="font-family:Inter,sans-serif">${escapeHtml(target.invoiceNumber)}</strong>
-              </div>
-              <div>
-                <span style="color:#64748b;margin-right:8px">วันที่:</span>
-                <strong>${formatDateThai(target.date)}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px">
-            <div>
-              <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px">ผู้ออก:</div>
-              <div>${escapeHtml(company.name || '')}</div>
-              <div style="font-size:12px">ที่อยู่: ${escapeHtml(company.address || '')}</div>
-              ${company.taxId ? `<div style="font-size:12px">เลขประจำตัวผู้เสียภาษี: ${escapeHtml(company.taxId)} (${formatBranch(company.branchCode)})</div>` : ''}
-            </div>
-            <div>
-              <div style="font-size:12px">จัดเตรียมโดย: <strong>${escapeHtml(target.preparedBy || '-')}</strong></div>
-              <div style="font-size:12px">เบอร์ติดต่อ: ${escapeHtml(company.phone || '')}</div>
-              <div style="font-size:12px">อีเมล: ${escapeHtml(company.email || '')}</div>
-            </div>
-          </div>
-
-          <table style="margin:16px 0">
-            <thead>
-              <tr>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:50px">ลำดับที่</th>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155">รายละเอียด</th>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:70px">จำนวน</th>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:100px">ราคาต่อหน่วย</th>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:80px">ส่วนลด</th>
-                <th style="background:#1e293b;color:white;padding:${cp};font-size:${compact ? '10px' : '12px'};text-align:center;border:1px solid #334155;width:110px">รวมเป็นเงิน</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemRows}
-              ${emptyRows}
-            </tbody>
-          </table>
-
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div style="font-size:12px;color:#64748b;max-width:50%">
-              ${target.notes ? `<div><strong>หมายเหตุ:</strong> ${escapeHtml(target.notes)}</div>` : ''}
-            </div>
-            <div style="width:280px">
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>ราคารวมสินค้า (บาท)</span>
-                <span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.subtotal)}</span>
-              </div>
-              ${target.billDiscount > 0 ? `
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>ส่วนลดท้ายบิล</span>
-                <span style="font-family:Inter,sans-serif;font-weight:600">-${formatNumber(target.billDiscount)}</span>
-              </div>` : ''}
-              ${target.type === 'tax_invoice' && target.vatIncluded ? `
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>มูลค่าสินค้าก่อน VAT</span>
-                <span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.preVatAmount)}</span>
-              </div>` : ''}
-              ${target.type === 'tax_invoice' ? `
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>ภาษีมูลค่าเพิ่ม ${target.vatRate}%${target.vatIncluded ? ' (รวมในราคา)' : ''}</span>
-                <span style="font-family:Inter,sans-serif;font-weight:600">${formatNumber(target.vatAmount)}</span>
-              </div>` : ''}
-              <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #1e293b;font-weight:800;font-size:15px">
-                <span>จำนวนเงินรวมทั้งสิ้น</span>
-                <span style="font-family:Inter,sans-serif">${formatNumber(target.grandTotal)}</span>
-              </div>
-              ${target.whtEnabled ? `
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e2e8f0">
-                <span>หัก ณ ที่จ่าย ${target.whtRate}%</span>
-                <span style="font-family:Inter,sans-serif;font-weight:600">-${formatNumber(target.whtAmount)}</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #1e293b;font-weight:800;font-size:15px">
-                <span>ยอดชำระสุทธิ</span>
-                <span style="font-family:Inter,sans-serif">${formatNumber(target.netPayable)}</span>
-              </div>` : ''}
-              <div style="font-size:12px;color:#64748b;text-align:right">
-                (${bahtText(target.whtEnabled ? target.netPayable : target.grandTotal)})
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:20px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:12px">
-            <div style="font-weight:700;margin-bottom:4px">ข้อมูลการชำระเงิน:</div>
-            ${target.paymentMethod === 'transfer' && bank.bankName ? `
-              <div>- ชื่อบัญชี: ${escapeHtml(bank.accountName)}</div>
-              <div>- ธนาคาร ${escapeHtml(bank.bankName)} เลขที่บัญชี ${escapeHtml(bank.accountNumber)}</div>
-            ` : ''}
-            ${target.paymentMethod === 'cash' ? '<div>- ชำระด้วยเงินสด</div>' : ''}
-            ${target.paymentMethod === 'check' ? '<div>- ชำระด้วยเช็ค</div>' : ''}
-            ${target.paymentMethod === 'credit' ? '<div>- ชำระด้วยบัตรเครดิต</div>' : ''}
-          </div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:40px">
-            <div style="text-align:center">
-              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:${compact ? '18px' : '40px'};margin-bottom:8px"></div>
-              <div style="font-size:12px;color:#64748b">อนุมัติโดย</div>
-            </div>
-            <div style="text-align:center">
-              <div style="border-bottom:1px dotted #94a3b8;padding-bottom:${compact ? '18px' : '40px'};margin-bottom:8px"></div>
-              <div style="font-size:12px;color:#64748b">รับชำระเงิน</div>
-            </div>
-          </div>
-        </body>
+        <body>${originalPages}${copyPages}</body>
       </html>
     `;
-    // Dot-matrix continuous forms normally have carbon/copy plies, so do not
-    // emit a second software page for those paper sizes.
-    if (target.type === 'tax_invoice' && !dotMatrix) {
-      docHtml = docHtml.replace(/<body>([\s\S]*)<\/body>/, (m, inner) =>
-        `<body>${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}</body>`);
-    }
+
     printHtml(docHtml);
   }
 

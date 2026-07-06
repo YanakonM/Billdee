@@ -24,12 +24,27 @@ export function isDotMatrixPaper(size) {
   return size === '9x5.5' || size === '9x11';
 }
 
+export const PRINT_ITEMS_PER_PAGE = 25;
+
+export function paginatePrintItems(items = [], perPage = PRINT_ITEMS_PER_PAGE) {
+  const list = Array.isArray(items) ? items : [];
+  const pageSize = Math.max(1, Number(perPage) || PRINT_ITEMS_PER_PAGE);
+  const pages = [];
+
+  for (let i = 0; i < list.length; i += pageSize) {
+    pages.push(list.slice(i, i + pageSize));
+  }
+
+  return pages.length ? pages : [[]];
+}
+
 // Print a full HTML document via a hidden iframe.
 // The old approach (window.open + document.write) does not work inside the
 // Tauri desktop app — the WebView blocks window.open, so nothing printed.
 // An iframe in the same document works in both the browser and the app.
 export function printHtml(html) {
   const iframe = document.createElement('iframe');
+  const previousTitle = document.title;
   Object.assign(iframe.style, {
     position: 'fixed', right: '0', bottom: '0',
     width: '0', height: '0', border: '0',
@@ -40,9 +55,21 @@ export function printHtml(html) {
   doc.write(html);
   doc.close();
   const win = iframe.contentWindow;
+  let restoredTitle = false;
+  const restoreTitle = () => {
+    if (restoredTitle) return;
+    restoredTitle = true;
+    try { document.title = previousTitle; } catch { /* ignore */ }
+  };
+  try {
+    document.title = '\u00a0';
+    win.document.title = '\u00a0';
+    win.addEventListener('afterprint', restoreTitle, { once: true });
+  } catch { /* ignore */ }
   // Give fonts/images a moment to load before opening the print dialog.
   setTimeout(() => {
     try { win.focus(); win.print(); } catch { /* ignore */ }
+    setTimeout(restoreTitle, 30000);
     // Clean up long after the dialog is dismissed (no reliable close event).
     setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* ignore */ } }, 120000);
   }, 700);
