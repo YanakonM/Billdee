@@ -1,6 +1,6 @@
 name: Release Billdee
 
-# Trigger: push a version tag like v0.1.1 (or run manually)
+# Trigger: push a version tag like v0.1.5 (or run manually)
 on:
   push:
     tags:
@@ -40,6 +40,12 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Billdee ${{ github.ref_name }}'
-          releaseBody: 'ติดตั้งจากไฟล์ด้านล่าง หรือกด "ตรวจหาอัปเดต" ในแอป Billdee เดิมเพื่ออัปเดตอัตโนมัติ'
+          releaseBody: |
+            ติดตั้งจากไฟล์ด้านล่าง หรือกด "ตรวจหาอัปเดต" ในแอป Billdee เดิมเพื่ออัปเดตอัตโนมัติ
+
+            ใหม่ในเวอร์ชันนี้:
+            - เพิ่มขนาดกระดาษต่อเนื่อง 9×11" สำหรับ Epson LQ-310
+            - ปรับโหมดหัวเข็ม 9×5.5" และ 9×11" ให้หัวตารางเป็นพื้นขาว ตัวอักษรดำ เส้นชัดขึ้น
+            - ลดพื้นหลัง/สีเทาและปรับหน้าพิมพ์เพื่อลดข้อความหัวท้ายหรือ URL ที่ติดมากับ browser print
           releaseDraft: false
           prerelease: false

@@ -1189,10 +1189,15 @@ input, select, textarea { font-family: inherit; }
    ============================================ */
 
 @media print {
+  @page {
+    margin: 0;
+  }
+
   body {
     background: white;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    color: #000;
+    -webkit-print-color-adjust: economy;
+    print-color-adjust: economy;
   }
 
   .sidebar,
@@ -1214,6 +1219,19 @@ input, select, textarea { font-family: inherit; }
     border: none;
     padding: 10mm;
     max-width: none;
+    color: #000;
+  }
+
+  .invoice-table thead th {
+    background: white !important;
+    color: #000 !important;
+    border: 1px solid #000 !important;
+  }
+
+  .invoice-table tbody td,
+  .invoice-table tfoot td {
+    border-color: #777 !important;
+    color: #000;
   }
 }
 

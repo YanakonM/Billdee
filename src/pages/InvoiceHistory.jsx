@@ -5,7 +5,7 @@ import Modal from '../components/Common/Modal';
 import { db, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort, formatDateThai, bahtText, formatBranch, escapeHtml } from '../utils/helpers';
-import { printHtml } from '../utils/print';
+import { PAPER_SIZE_OPTIONS, getPaperConfig, isDotMatrixPaper, printHtml } from '../utils/print';
 import {
   Search, FileText, Eye, Printer, Trash2, Filter,
   CheckCircle, Clock, XCircle, Download, Edit2
@@ -183,21 +183,27 @@ export default function InvoiceHistory() {
     setShowPreview(true);
   }
 
+  const previewDotMatrix = isDotMatrixPaper(paperSize);
+  const previewTableHeaderStyle = {
+    background: previewDotMatrix ? 'white' : '#1e293b',
+    color: previewDotMatrix ? '#000' : 'white',
+    padding: '6px 8px',
+    fontSize: '11px',
+    border: previewDotMatrix ? '1px solid #000' : '1px solid #334155',
+  };
+  const previewCellBorder = previewDotMatrix ? '1px solid #777' : '1px solid #e2e8f0';
+
   function handlePrint(inv, size = paperSize) {
     const target = inv || selectedInvoice;
     if (!target) return;
     if (size === '80mm' || size === '58mm') return printThermal(target, size === '58mm' ? 58 : 80);
 
-    const cfg = {
-      A4: { page: 'A4', margin: '10mm', font: '13px' },
-      A5: { page: 'A5', margin: '8mm', font: '11px' },
-      Letter: { page: 'Letter', margin: '10mm', font: '13px' },
-      '9x5.5': { page: '9in 5.5in', margin: '5mm', font: '11px' },
-    }[size] || { page: 'A4', margin: '10mm', font: '13px' };
+    const cfg = getPaperConfig(size);
+    const dotMatrix = isDotMatrixPaper(size);
     // Compact = 9×5.5" continuous form (dot matrix): tight cells, no filler
     // rows, single page (carbon copies come from the multi-part paper).
     const compact = size === '9x5.5';
-    const cp = compact ? '3px 6px' : '8px 10px';
+    const cp = compact ? '3px 6px' : dotMatrix ? '5px 8px' : '8px 10px';
     const items = target.items || [];
     const company = target.company || {};
     const bank = target.bank || {};
@@ -227,18 +233,28 @@ export default function InvoiceHistory() {
       </tr>
     `).join('');
 
+    const dotMatrixCss = dotMatrix ? `
+              body { color:#000 !important; font-weight:500; }
+              div, span, td, th, strong { color:#000 !important; }
+              [style*="background:#f8fafc"],
+              [style*="background: #f8fafc"] { background:#fff !important; border:1px solid #777 !important; border-radius:0 !important; }
+              th { background:#fff !important; color:#000 !important; border:1px solid #000 !important; font-weight:700 !important; }
+              td { border-color:#777 !important; }
+            ` : '';
+
     let docHtml = `
       <html>
         <head>
           <title>${docTitle} ${escapeHtml(target.invoiceNumber)}</title>
           <link href="/fonts/fonts.css" rel="stylesheet">
           <style>
-            * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:#1e293b; font-size:${cfg.font}; line-height:${compact ? '1.35' : '1.6'}; }
+            * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:${dotMatrix ? 'economy' : 'exact'}; print-color-adjust:${dotMatrix ? 'economy' : 'exact'}; }
+            body { font-family:'Sarabun',sans-serif; padding:${cfg.margin}; color:${dotMatrix ? '#000' : '#1e293b'}; font-size:${cfg.font}; line-height:${compact ? '1.35' : '1.55'}; -webkit-font-smoothing:auto; text-rendering:optimizeLegibility; }
             table { width:100%; border-collapse:collapse; }
             /* Compact mode: collapse the big fixed gaps so a normal bill fits one 9×5.5" page. */
             ${compact ? 'body>div,table{margin-top:6px !important;margin-bottom:6px !important}' : ''}
-            @media print { @page { size:${cfg.page}; margin:${cfg.margin}; } body { padding:0; } }
+            ${dotMatrixCss}
+            @media print { @page { size:${cfg.page}; margin:0; } body { padding:${cfg.margin}; } }
           </style>
         </head>
         <body>
@@ -374,9 +390,9 @@ export default function InvoiceHistory() {
         </body>
       </html>
     `;
-    // Tax invoices print as ต้นฉบับ + สำเนา (two pages) — except on 9×5.5"
-    // multi-part carbon paper, where the copy is the second ply.
-    if (target.type === 'tax_invoice' && !compact) {
+    // Dot-matrix continuous forms normally have carbon/copy plies, so do not
+    // emit a second software page for those paper sizes.
+    if (target.type === 'tax_invoice' && !dotMatrix) {
       docHtml = docHtml.replace(/<body>([\s\S]*)<\/body>/, (m, inner) =>
         `<body>${inner}<div style="page-break-before:always"></div>${inner.replace('ต้นฉบับ (Original)', 'สำเนา (Copy)')}</body>`);
     }
@@ -545,12 +561,9 @@ export default function InvoiceHistory() {
                 onChange={e => changePaperSize(e.target.value)}
                 style={{ width: 'auto', padding: '8px 28px 8px 12px' }}
               >
-                <option value="A4">A4</option>
-                <option value="A5">A5</option>
-                <option value="Letter">Letter</option>
-                <option value="9x5.5">ต่อเนื่อง 9×5.5" (หัวเข็ม)</option>
-                <option value="80mm">ใบเสร็จย่อ 80mm</option>
-                <option value="58mm">ใบเสร็จย่อ 58mm</option>
+                {PAPER_SIZE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
               <button className="btn btn-accent" onClick={() => handlePrint()}>
                 <Printer size={18} /> พิมพ์ ({paperSize})
@@ -558,7 +571,7 @@ export default function InvoiceHistory() {
             </>
           }
         >
-          <div className="invoice-paper" style={{ fontSize: '13px', lineHeight: '1.6' }}>
+          <div className="invoice-paper" style={{ fontSize: '13px', lineHeight: '1.6', color: previewDotMatrix ? '#000' : undefined }}>
             {/* Simplified preview */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '12px', borderBottom: '2px solid #1e293b' }}>
               <div>
@@ -584,21 +597,21 @@ export default function InvoiceHistory() {
             <table style={{ width: '100%', borderCollapse: 'collapse', margin: '12px 0' }}>
               <thead>
                 <tr>
-                  <th style={{ background: '#1e293b', color: 'white', padding: '6px 8px', fontSize: '11px', border: '1px solid #334155' }}>#</th>
-                  <th style={{ background: '#1e293b', color: 'white', padding: '6px 8px', fontSize: '11px', border: '1px solid #334155' }}>รายละเอียด</th>
-                  <th style={{ background: '#1e293b', color: 'white', padding: '6px 8px', fontSize: '11px', border: '1px solid #334155' }}>จำนวน</th>
-                  <th style={{ background: '#1e293b', color: 'white', padding: '6px 8px', fontSize: '11px', border: '1px solid #334155' }}>ราคา</th>
-                  <th style={{ background: '#1e293b', color: 'white', padding: '6px 8px', fontSize: '11px', border: '1px solid #334155' }}>รวม</th>
+                  <th style={previewTableHeaderStyle}>#</th>
+                  <th style={previewTableHeaderStyle}>รายละเอียด</th>
+                  <th style={previewTableHeaderStyle}>จำนวน</th>
+                  <th style={previewTableHeaderStyle}>ราคา</th>
+                  <th style={previewTableHeaderStyle}>รวม</th>
                 </tr>
               </thead>
               <tbody>
                 {(selectedInvoice.items || []).map((item, idx) => (
                   <tr key={idx}>
-                    <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{idx + 1}</td>
-                    <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0' }}>{item.description}</td>
-                    <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{item.quantity}</td>
-                    <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{formatNumber(item.unitPrice)}</td>
-                    <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 600 }}>{formatNumber(item.total)}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'center' }}>{idx + 1}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder }}>{item.description}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'center' }}>{item.quantity}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'right' }}>{formatNumber(item.unitPrice)}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'right', fontWeight: 600 }}>{formatNumber(item.total)}</td>
                   </tr>
                 ))}
               </tbody>
