@@ -226,7 +226,7 @@ export default function Reports() {
   }, [periodInvoices]);
 
   const typeLabel = (t) =>
-    t === 'tax_invoice' ? 'ใบกำกับภาษี' : t === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จ';
+    t === 'tax_invoice' ? 'ใบกำกับภาษี' : t === 'delivery' ? 'ใบส่งของ' : t === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จ';
   const statusLabelCsv = (s) =>
     s === 'paid' ? 'ชำระแล้ว' : s === 'cancelled' ? 'ยกเลิก' : 'ค้างชำระ';
 

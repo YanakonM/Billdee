@@ -35,6 +35,7 @@ const translations = {
     // Invoice
     invoice: {
       receipt: 'ใบเสร็จรับเงิน',
+      cashBill: 'บิลเงินสด',
       taxInvoice: 'ใบกำกับภาษี',
       quotation: 'ใบเสนอราคา',
       deliveryNote: 'ใบส่งของ',
@@ -182,6 +183,7 @@ const translations = {
     },
     invoice: {
       receipt: 'Receipt',
+      cashBill: 'Cash Bill',
       taxInvoice: 'Tax Invoice',
       quotation: 'Quotation',
       deliveryNote: 'Delivery Note',

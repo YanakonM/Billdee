@@ -67,7 +67,7 @@ export default function InvoiceHistory() {
     const base = width === 58 ? 10 : 12;
     const company = target.company || {};
     const items = target.items || [];
-    const title = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
+    const title = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : target.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน';
     const itemLines = items.map((item, idx) => `
       <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${escapeHtml(item.description)}</span><span>${formatNumber(item.total)}</span></div>
       <div style="font-size:10px;color:#666;padding-left:16px">${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
@@ -227,8 +227,8 @@ export default function InvoiceHistory() {
     const thColor = dotMatrix ? '#000' : '#fff';
     const thBorder = dotMatrix ? '#000' : '#334155';
 
-    const docTitle = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
-    const docTitleEn = target.type === 'tax_invoice' ? 'Tax Invoice' : target.type === 'delivery' ? 'Delivery Note' : 'Receipt';
+    const docTitle = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : target.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน';
+    const docTitleEn = target.type === 'tax_invoice' ? 'Tax Invoice' : target.type === 'delivery' ? 'Delivery Note' : target.type === 'cash_bill' ? 'Cash Bill' : 'Receipt';
 
     const renderRows = (pageItems, pageIndex) => pageItems.map((item, idx) => `
       <tr>
@@ -461,7 +461,7 @@ export default function InvoiceHistory() {
                     <td style={{ fontWeight: 600 }}>{inv.customerName || '-'}</td>
                     <td>
                       <span className={`badge ${inv.type === 'tax_invoice' ? 'badge-primary' : inv.type === 'delivery' ? 'badge-warning' : 'badge-success'}`}>
-                        {inv.type === 'tax_invoice' ? 'ใบกำกับภาษี' : inv.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จ'}
+                        {inv.type === 'tax_invoice' ? 'ใบกำกับภาษี' : inv.type === 'delivery' ? 'ใบส่งของ' : inv.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จ'}
                       </span>
                       {inv.fromQuotation && (
                         <div style={{ fontSize: '10px', color: 'var(--color-gray-500)', marginTop: '2px' }}>
@@ -560,7 +560,7 @@ export default function InvoiceHistory() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '12px', borderBottom: '2px solid #1e293b' }}>
               <div>
                 <div style={{ fontSize: '20px', fontWeight: 800 }}>
-                  {selectedInvoice.type === 'tax_invoice' ? 'ใบกำกับภาษี' : selectedInvoice.type === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน'}
+                  {selectedInvoice.type === 'tax_invoice' ? 'ใบกำกับภาษี' : selectedInvoice.type === 'delivery' ? 'ใบส่งของ' : selectedInvoice.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน'}
                   {selectedInvoice.status === 'cancelled' && <span style={{ color: '#dc2626', fontSize: '15px' }}> (ยกเลิก)</span>}
                 </div>
               </div>

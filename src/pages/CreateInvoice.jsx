@@ -558,7 +558,7 @@ export default function CreateInvoice() {
         <div style="text-align:center;font-size:10px;color:#666">${escapeHtml(company.address || '')}</div>
         <div style="text-align:center;font-size:10px">Tel: ${escapeHtml(company.phone || '')}</div>
         <div class="divider"></div>
-        <div style="text-align:center;font-weight:700">${docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน'}</div>
+        <div style="text-align:center;font-weight:700">${docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : docType === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน'}</div>
         <div style="display:flex;justify-content:space-between;font-size:11px">
           <span>เลขที่: ${escapeHtml(invoiceNumber)}</span>
           <span>${formatDateThai(invoiceDate)}</span>
@@ -743,6 +743,7 @@ export default function CreateInvoice() {
                     if (!numberEdited && !editingId) refreshPreviewNumber(e.target.value);
                   }}>
                     <option value="receipt">ใบเสร็จรับเงิน (Receipt)</option>
+                    <option value="cash_bill">บิลเงินสด (Cash Bill)</option>
                     <option value="tax_invoice">ใบกำกับภาษี (Tax Invoice)</option>
                     <option value="delivery">ใบส่งของ (Delivery Note)</option>
                   </select>
@@ -1159,8 +1160,8 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
     preparedBy, paymentMethod, cashReceived, changeDue, notes, company, bank,
   } = data;
 
-  const docTitle = docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : 'ใบเสร็จรับเงิน';
-  const docTitleEn = docType === 'tax_invoice' ? 'Tax Invoice' : docType === 'delivery' ? 'Delivery Note' : 'Receipt';
+  const docTitle = docType === 'tax_invoice' ? 'ใบกำกับภาษี' : docType === 'delivery' ? 'ใบส่งของ' : docType === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน';
+  const docTitleEn = docType === 'tax_invoice' ? 'Tax Invoice' : docType === 'delivery' ? 'Delivery Note' : docType === 'cash_bill' ? 'Cash Bill' : 'Receipt';
   const payAmount = whtEnabled ? netPayable : grandTotal;
   const printPages = paginatePrintItems(items, PRINT_ITEMS_PER_PAGE);
 
