@@ -70,7 +70,7 @@ export default function InvoiceHistory() {
     const title = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : target.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน';
     const itemLines = items.map((item, idx) => `
       <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>${idx + 1}. ${escapeHtml(item.description)}</span><span>${formatNumber(item.total)}</span></div>
-      <div style="font-size:10px;color:#666;padding-left:16px">${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
+      <div style="font-size:10px;color:#666;padding-left:16px">${escapeHtml(item.quantity)}${item.unit ? ' ' + escapeHtml(item.unit) : ''} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}</div>
     `).join('');
     printHtml(`
       <html><head><title>&nbsp;</title>
@@ -183,15 +183,15 @@ export default function InvoiceHistory() {
     setShowPreview(true);
   }
 
-  const previewDotMatrix = isDotMatrixPaper(paperSize);
   const previewTableHeaderStyle = {
-    background: previewDotMatrix ? 'white' : '#1e293b',
-    color: previewDotMatrix ? '#000' : 'white',
+    background: 'white',
+    color: '#000',
     padding: '6px 8px',
     fontSize: '11px',
-    border: previewDotMatrix ? '1px solid #000' : '1px solid #334155',
+    border: '1px solid #000',
+    fontWeight: 700,
   };
-  const previewCellBorder = previewDotMatrix ? '1px solid #777' : '1px solid #e2e8f0';
+  const previewCellBorder = '1px solid #777';
 
   function handlePrint(inv, size = paperSize) {
     const target = inv || selectedInvoice;
@@ -223,9 +223,9 @@ export default function InvoiceHistory() {
     const subText = dotMatrix ? '#000' : '#475569';
     const borderStrong = dotMatrix ? '#000' : '#1e293b';
     const borderLight = dotMatrix ? '#777' : '#e2e8f0';
-    const thBg = dotMatrix ? '#fff' : '#1e293b';
-    const thColor = dotMatrix ? '#000' : '#fff';
-    const thBorder = dotMatrix ? '#000' : '#334155';
+    const thBg = '#fff';
+    const thColor = '#000';
+    const thBorder = '#000';
 
     const docTitle = target.type === 'tax_invoice' ? 'ใบกำกับภาษี' : target.type === 'delivery' ? 'ใบส่งของ' : target.type === 'cash_bill' ? 'บิลเงินสด' : 'ใบเสร็จรับเงิน';
     const docTitleEn = target.type === 'tax_invoice' ? 'Tax Invoice' : target.type === 'delivery' ? 'Delivery Note' : target.type === 'cash_bill' ? 'Cash Bill' : 'Receipt';
@@ -235,6 +235,7 @@ export default function InvoiceHistory() {
         <td style="padding:${cp};border:1px solid ${borderLight};text-align:center">${(pageIndex * PRINT_ITEMS_PER_PAGE) + idx + 1}</td>
         <td style="padding:${cp};border:1px solid ${borderLight}">${escapeHtml(item.description)}</td>
         <td style="padding:${cp};border:1px solid ${borderLight};text-align:center">${escapeHtml(item.quantity)}</td>
+        <td style="padding:${cp};border:1px solid ${borderLight};text-align:center">${escapeHtml(item.unit || '-')}</td>
         <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-family:Inter,sans-serif">${formatNumber(item.unitPrice)}</td>
         <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-family:Inter,sans-serif">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
         <td style="padding:${cp};border:1px solid ${borderLight};text-align:right;font-weight:600;font-family:Inter,sans-serif">${formatNumber(item.total)}</td>
@@ -281,7 +282,7 @@ export default function InvoiceHistory() {
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:${compact || dotMatrix ? '12px' : '20px'};margin-bottom:${sectionGap};padding:${panelPad};background:#f8fafc;border-radius:${dotMatrix ? '0' : '8px'}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:${compact || dotMatrix ? '12px' : '20px'};margin-bottom:${sectionGap};padding:${panelPad};background:white;border:1px solid #777;border-radius:0">
           <div>
             <div style="font-size:12px;font-weight:700;color:${muted};margin-bottom:4px">ผู้ออก:</div>
             <div>${escapeHtml(company.name || '')}</div>
@@ -298,12 +299,13 @@ export default function InvoiceHistory() {
         <table style="margin:${tableMargin}">
           <thead>
             <tr>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:50px">ลำดับที่</th>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder}">รายละเอียด</th>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:70px">จำนวน</th>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:100px">ราคาต่อหน่วย</th>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:80px">ส่วนลด</th>
-              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};width:110px">รวมเป็นเงิน</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:50px">ลำดับที่</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700">รายละเอียด</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:60px">จำนวน</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:60px">หน่วย</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:100px">ราคาต่อหน่วย</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:80px">ส่วนลด</th>
+              <th style="background:${thBg};color:${thColor};padding:${cp};font-size:${compact || dotMatrix ? '10px' : '12px'};text-align:center;border:1px solid ${thBorder};font-weight:700;width:110px">รวมเป็นเงิน</th>
             </tr>
           </thead>
           <tbody>${renderRows(pageItems, pageIndex)}</tbody>
@@ -555,7 +557,7 @@ export default function InvoiceHistory() {
             </>
           }
         >
-          <div className="invoice-paper" style={{ fontSize: '13px', lineHeight: '1.6', color: previewDotMatrix ? '#000' : undefined }}>
+          <div className="invoice-paper" style={{ fontSize: '13px', lineHeight: '1.6', color: '#000' }}>
             {/* Simplified preview */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '12px', borderBottom: '2px solid #1e293b' }}>
               <div>
@@ -584,6 +586,7 @@ export default function InvoiceHistory() {
                   <th style={previewTableHeaderStyle}>#</th>
                   <th style={previewTableHeaderStyle}>รายละเอียด</th>
                   <th style={previewTableHeaderStyle}>จำนวน</th>
+                  <th style={previewTableHeaderStyle}>หน่วย</th>
                   <th style={previewTableHeaderStyle}>ราคา</th>
                   <th style={previewTableHeaderStyle}>รวม</th>
                 </tr>
@@ -594,6 +597,7 @@ export default function InvoiceHistory() {
                     <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'center' }}>{idx + 1}</td>
                     <td style={{ padding: '6px 8px', border: previewCellBorder }}>{item.description}</td>
                     <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'center' }}>{item.quantity}</td>
+                    <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'center' }}>{item.unit || '-'}</td>
                     <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'right' }}>{formatNumber(item.unitPrice)}</td>
                     <td style={{ padding: '6px 8px', border: previewCellBorder, textAlign: 'right', fontWeight: 600 }}>{formatNumber(item.total)}</td>
                   </tr>

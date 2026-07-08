@@ -72,6 +72,8 @@ export async function initializeSettings() {
         value: {
           prefix: 'INV',
           nextNumber: 1,
+          cashBillPrefix: 'CSB',
+          nextCashBillNumber: 1,
           vatRate: 7,
           // false = prices are ex-VAT (VAT added on top). true = prices already
           // include VAT (VAT is extracted as amount × rate/(100+rate)).
@@ -126,6 +128,41 @@ export async function initializeSettings() {
     if (invSetting.value.nextDeliveryNoteNumber == null) invSetting.value.nextDeliveryNoteNumber = 1;
     invDirty = true;
   }
+  // Migration: Ensure cash bill and all other document prefixes are initialized
+  if (invSetting) {
+    if (!invSetting.value.cashBillPrefix) {
+      invSetting.value.cashBillPrefix = 'CSB';
+      invDirty = true;
+    }
+    if (invSetting.value.nextCashBillNumber == null) {
+      invSetting.value.nextCashBillNumber = 1;
+      invDirty = true;
+    }
+    if (!invSetting.value.quotationPrefix) {
+      invSetting.value.quotationPrefix = 'QT';
+      invDirty = true;
+    }
+    if (invSetting.value.nextQuotationNumber == null) {
+      invSetting.value.nextQuotationNumber = 1;
+      invDirty = true;
+    }
+    if (!invSetting.value.creditNotePrefix) {
+      invSetting.value.creditNotePrefix = 'CN';
+      invDirty = true;
+    }
+    if (invSetting.value.nextCreditNoteNumber == null) {
+      invSetting.value.nextCreditNoteNumber = 1;
+      invDirty = true;
+    }
+    if (!invSetting.value.debitNotePrefix) {
+      invSetting.value.debitNotePrefix = 'DN';
+      invDirty = true;
+    }
+    if (invSetting.value.nextDebitNoteNumber == null) {
+      invSetting.value.nextDebitNoteNumber = 1;
+      invDirty = true;
+    }
+  }
   // Migration: `includeVat` existed in old seeds but was never honoured (VAT
   // was always added on top). Now that the flag actually works, reset any old
   // stored value to false ONCE so existing installs keep the behaviour they
@@ -155,6 +192,15 @@ export async function getNextQuotationNumber() {
   if (!setting) return 'QT-000001';
   const prefix = setting.value.quotationPrefix || 'QT';
   const nextNum = setting.value.nextQuotationNumber || 1;
+  return `${prefix}-${String(nextNum).padStart(6, '0')}`;
+}
+
+// Generate next cash bill number
+export async function getNextCashBillNumber() {
+  const setting = await db.settings.get('invoice');
+  if (!setting) return 'CSB-000001';
+  const prefix = setting.value.cashBillPrefix || 'CSB';
+  const nextNum = setting.value.nextCashBillNumber || 1;
   return `${prefix}-${String(nextNum).padStart(6, '0')}`;
 }
 
@@ -202,6 +248,7 @@ export function reserveDocumentNumber(kind = 'invoice') {
       quotation: { prefix: v.quotationPrefix || 'QT',    key: 'nextQuotationNumber' },
       credit:    { prefix: v.creditNotePrefix || 'CN',   key: 'nextCreditNoteNumber' },
       debit:     { prefix: v.debitNotePrefix || 'DN',    key: 'nextDebitNoteNumber' },
+      cash_bill: { prefix: v.cashBillPrefix || 'CSB',    key: 'nextCashBillNumber' },
     }[kind] || { prefix: v.prefix || 'INV', key: 'nextNumber' };
     const num = v[conf.key] || 1;
     v[conf.key] = num + 1;

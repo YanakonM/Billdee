@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import Modal from '../components/Common/Modal';
-import { db, getNextInvoiceNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
+import { db, getNextInvoiceNumber, getNextCashBillNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId, escapeHtml } from '../utils/helpers';
 import { generatePromptPayPayload } from '../utils/promptpay';
@@ -160,6 +160,8 @@ export default function CreateInvoice() {
     const v = setting.value;
     if (type === 'delivery') {
       setInvoiceNumber(`${v.deliveryNotePrefix || 'DO'}-${String(v.nextDeliveryNoteNumber || 1).padStart(6, '0')}`);
+    } else if (type === 'cash_bill') {
+      setInvoiceNumber(`${v.cashBillPrefix || 'CSB'}-${String(v.nextCashBillNumber || 1).padStart(6, '0')}`);
     } else {
       setInvoiceNumber(`${v.prefix || 'INV'}-${String(v.nextNumber || 1).padStart(6, '0')}`);
     }
@@ -265,6 +267,7 @@ export default function CreateInvoice() {
         discount: 0,
         total: product.price || 0,
         productId: product.id,
+        unit: product.unit || '',
       };
       return [...prev.filter(i => i.description), newItem];
     });
@@ -395,10 +398,11 @@ export default function CreateInvoice() {
       if (!editingId && !numberEdited) {
         // Reserve atomically; skip numbers already burned by a manually-typed
         // document so the auto series can never collide with one.
-        finalNumber = await reserveDocumentNumber(docType === 'delivery' ? 'delivery' : 'invoice');
+        const kind = docType === 'delivery' ? 'delivery' : docType === 'cash_bill' ? 'cash_bill' : 'invoice';
+        finalNumber = await reserveDocumentNumber(kind);
         let guard = 0;
         while (existingInvoices.some(i => i.invoiceNumber === finalNumber) && guard++ < 500) {
-          finalNumber = await reserveDocumentNumber(docType === 'delivery' ? 'delivery' : 'invoice');
+          finalNumber = await reserveDocumentNumber(kind);
         }
       } else {
         const dup = existingInvoices.some(i =>
@@ -541,7 +545,7 @@ export default function CreateInvoice() {
         <span>${formatNumber(item.total)}</span>
       </div>
       <div style="font-size:10px;color:#666;padding-left:16px">
-        ${escapeHtml(item.quantity)} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}
+        ${escapeHtml(item.quantity)}${item.unit ? ' ' + escapeHtml(item.unit) : ''} x ${formatNumber(item.unitPrice)}${item.discount > 0 ? ` -${formatNumber(item.discount)}` : ''}
       </div>
     `).join('');
 
@@ -892,6 +896,7 @@ export default function CreateInvoice() {
                       <th style={{ width: '60px' }}>ลำดับ</th>
                       <th>รายละเอียด</th>
                       <th style={{ width: '100px' }}>จำนวน</th>
+                      <th style={{ width: '80px' }}>หน่วย</th>
                       <th style={{ width: '130px' }}>ราคา/หน่วย</th>
                       <th style={{ width: '110px' }}>ส่วนลด</th>
                       <th style={{ width: '130px' }} className="text-right">รวม</th>
@@ -920,6 +925,16 @@ export default function CreateInvoice() {
                             onChange={e => updateItem(item.id, 'quantity', e.target.value)}
                             min="1"
                             style={{ textAlign: 'center', padding: '4px 8px' }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={item.unit || ''}
+                            onChange={e => updateItem(item.id, 'unit', e.target.value)}
+                            placeholder="ชิ้น"
+                            style={{ textAlign: 'center', padding: '4px 8px', border: 'none', background: 'transparent' }}
                           />
                         </td>
                         <td>
@@ -1191,17 +1206,15 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
   const borderStrong = dotMatrix ? '#000' : '#1e293b';
   const borderLight = dotMatrix ? '#777' : '#e2e8f0';
   const tableHeaderStyle = {
-    background: dotMatrix ? 'white' : '#1e293b',
-    color: dotMatrix ? '#000' : 'white',
+    background: 'white',
+    color: '#000',
     padding: cellPad,
     fontSize: compact ? '10px' : dotMatrix ? '10.5px' : '12px',
     textAlign: 'center',
-    border: dotMatrix ? '1px solid #000' : '1px solid #334155',
+    border: '1px solid #000',
     fontWeight: 700,
   };
-  const sellerPanelStyle = dotMatrix
-    ? { background: 'white', border: '1px solid #777', borderRadius: 0 }
-    : { background: '#f8fafc', borderRadius: '8px' };
+  const sellerPanelStyle = { background: 'white', border: '1px solid #777', borderRadius: 0 };
 
   return (
     <>
@@ -1301,7 +1314,8 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
           <tr>
             <th style={{ ...tableHeaderStyle, width: '50px' }}>ลำดับที่</th>
             <th style={tableHeaderStyle}>รายละเอียด</th>
-            <th style={{ ...tableHeaderStyle, width: '70px' }}>จำนวน</th>
+            <th style={{ ...tableHeaderStyle, width: '60px' }}>จำนวน</th>
+            <th style={{ ...tableHeaderStyle, width: '60px' }}>หน่วย</th>
             <th style={{ ...tableHeaderStyle, width: '100px' }}>ราคาต่อหน่วย</th>
             <th style={{ ...tableHeaderStyle, width: '80px' }}>ส่วนลด</th>
             <th style={{ ...tableHeaderStyle, width: '110px' }}>รวมเป็นเงิน</th>
@@ -1313,6 +1327,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{itemOffset + idx + 1}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}>{item.description}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{item.quantity}</td>
+              <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'center' }}>{item.unit || '-'}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.unitPrice)}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>{item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}`, textAlign: 'right', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>{formatNumber(item.total)}</td>
@@ -1322,6 +1337,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
           {Array.from({ length: fillerRows }).map((_, idx) => (
             <tr key={`empty-${idx}`}>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}>&nbsp;</td>
+              <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}></td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}></td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}></td>
               <td style={{ padding: cellPad, border: `1px solid ${borderLight}` }}></td>

@@ -27,8 +27,13 @@ export default function Settings() {
     bankName: '', accountName: '', accountNumber: '', promptPayId: ''
   });
   const [invoice, setInvoice] = useState({
-    prefix: 'INV', nextNumber: 1, vatRate: 7,
-    includeVat: true, dateFormat: 'th', documentType: 'both'
+    prefix: 'INV', nextNumber: 1,
+    cashBillPrefix: 'CSB', nextCashBillNumber: 1,
+    quotationPrefix: 'QT', nextQuotationNumber: 1,
+    deliveryNotePrefix: 'DO', nextDeliveryNoteNumber: 1,
+    creditNotePrefix: 'CN', nextCreditNoteNumber: 1,
+    debitNotePrefix: 'DN', nextDebitNoteNumber: 1,
+    vatRate: 7, includeVat: true, dateFormat: 'th', documentType: 'both'
   });
   const [stock, setStock] = useState({
     trackStock: true, lowStockThreshold: 10, showStockWarning: true
@@ -493,20 +498,116 @@ export default function Settings() {
 
               {activeTab === 'invoice' && (
                 <>
-                  <h3 style={{ marginBottom: '20px', fontWeight: 700 }}>ตั้งค่าใบเสร็จ</h3>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">คำนำหน้าเลขที่เอกสาร</label>
-                      <input type="text" className="form-input" value={invoice.prefix}
-                        onChange={e => setInvoice({ ...invoice, prefix: e.target.value })}
-                        placeholder="INV" style={{ maxWidth: '150px' }} />
-                      <p className="form-help">ตัวอย่าง: {invoice.prefix}-{String(invoice.nextNumber).padStart(6, '0')}</p>
+                  <h3 style={{ marginBottom: '20px', fontWeight: 700 }}>ตั้งค่าเลขที่เอกสาร</h3>
+                  <div style={{ display: 'grid', gap: '16px', marginBottom: '24px' }}>
+                    {/* Row 1: Receipt / Tax Invoice */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>ใบเสร็จรับเงิน / ใบกำกับภาษี</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.prefix || 'INV'}-{String(invoice.nextNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>คำนำหน้า</label>
+                        <input type="text" className="form-input" value={invoice.prefix || ''}
+                          onChange={e => setInvoice({ ...invoice, prefix: e.target.value })}
+                          placeholder="INV" />
+                      </div>
+                      <div>
+                        <label className="form-label" style={{ fontSize: '12px', marginBottom: '4px' }}>เลขถัดไป</label>
+                        <input type="number" className="form-input" value={invoice.nextNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">เลขลำดับถัดไป</label>
-                      <input type="number" className="form-input" value={invoice.nextNumber}
-                        onChange={e => setInvoice({ ...invoice, nextNumber: parseInt(e.target.value) || 1 })}
-                        min="1" style={{ maxWidth: '150px' }} />
+
+                    {/* Row 2: Cash Bill */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>บิลเงินสด (Cash Bill)</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.cashBillPrefix || 'CSB'}-{String(invoice.nextCashBillNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <input type="text" className="form-input" value={invoice.cashBillPrefix || ''}
+                          onChange={e => setInvoice({ ...invoice, cashBillPrefix: e.target.value })}
+                          placeholder="CSB" />
+                      </div>
+                      <div>
+                        <input type="number" className="form-input" value={invoice.nextCashBillNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextCashBillNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
+                    </div>
+
+                    {/* Row 3: Quotation */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>ใบเสนอราคา (Quotation)</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.quotationPrefix || 'QT'}-{String(invoice.nextQuotationNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <input type="text" className="form-input" value={invoice.quotationPrefix || ''}
+                          onChange={e => setInvoice({ ...invoice, quotationPrefix: e.target.value })}
+                          placeholder="QT" />
+                      </div>
+                      <div>
+                        <input type="number" className="form-input" value={invoice.nextQuotationNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextQuotationNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
+                    </div>
+
+                    {/* Row 4: Delivery Note */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>ใบส่งของ (Delivery Note)</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.deliveryNotePrefix || 'DO'}-{String(invoice.nextDeliveryNoteNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <input type="text" className="form-input" value={invoice.deliveryNotePrefix || ''}
+                          onChange={e => setInvoice({ ...invoice, deliveryNotePrefix: e.target.value })}
+                          placeholder="DO" />
+                      </div>
+                      <div>
+                        <input type="number" className="form-input" value={invoice.nextDeliveryNoteNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextDeliveryNoteNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
+                    </div>
+
+                    {/* Row 5: Credit Note */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>ใบลดหนี้ (Credit Note)</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.creditNotePrefix || 'CN'}-{String(invoice.nextCreditNoteNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <input type="text" className="form-input" value={invoice.creditNotePrefix || ''}
+                          onChange={e => setInvoice({ ...invoice, creditNotePrefix: e.target.value })}
+                          placeholder="CN" />
+                      </div>
+                      <div>
+                        <input type="number" className="form-input" value={invoice.nextCreditNoteNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextCreditNoteNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
+                    </div>
+
+                    {/* Row 6: Debit Note */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>ใบเพิ่มหนี้ (Debit Note)</div>
+                        <p style={{ fontSize: '11px', color: 'var(--color-gray-400)', margin: 0 }}>ตัวอย่าง: {invoice.debitNotePrefix || 'DN'}-{String(invoice.nextDebitNoteNumber || 1).padStart(6, '0')}</p>
+                      </div>
+                      <div>
+                        <input type="text" className="form-input" value={invoice.debitNotePrefix || ''}
+                          onChange={e => setInvoice({ ...invoice, debitNotePrefix: e.target.value })}
+                          placeholder="DN" />
+                      </div>
+                      <div>
+                        <input type="number" className="form-input" value={invoice.nextDebitNoteNumber || 1}
+                          onChange={e => setInvoice({ ...invoice, nextDebitNoteNumber: parseInt(e.target.value) || 1 })}
+                          min="1" />
+                      </div>
                     </div>
                   </div>
                   <div className="form-row">

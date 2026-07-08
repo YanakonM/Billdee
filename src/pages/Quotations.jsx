@@ -177,6 +177,7 @@ export default function Quotations() {
         discount: 0,
         total: product.price || 0,
         productId: product.id,
+        unit: product.unit || '',
       };
       return [...prev.filter(i => i.description), newItem];
     });
@@ -378,12 +379,13 @@ export default function Quotations() {
 
     const itemRows = items.map((item, idx) => `
       <tr>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${idx + 1}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0">${escapeHtml(item.description)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">${escapeHtml(item.quantity)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right">${formatNumber(item.unitPrice)}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
-        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:right;font-weight:600">${formatNumber(item.total)}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:center">${idx + 1}</td>
+        <td style="padding:8px 10px;border:1px solid #777">${escapeHtml(item.description)}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:center">${escapeHtml(item.quantity)}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:center">${escapeHtml(item.unit || '-')}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:right">${formatNumber(item.unitPrice)}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:right">${item.discount > 0 ? formatNumber(item.discount) : '-'}</td>
+        <td style="padding:8px 10px;border:1px solid #777;text-align:right;font-weight:600">${formatNumber(item.total)}</td>
       </tr>
     `).join('');
 
@@ -412,12 +414,13 @@ export default function Quotations() {
       </div>
       <table style="margin:16px 0">
         <thead><tr>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155;width:50px">ลำดับ</th>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155">รายละเอียด</th>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155;width:70px">จำนวน</th>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155;width:100px">ราคา/หน่วย</th>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155;width:80px">ส่วนลด</th>
-          <th style="background:#1e293b;color:white;padding:8px 10px;font-size:12px;border:1px solid #334155;width:110px">รวม</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:50px">ลำดับ</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700">รายละเอียด</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:60px">จำนวน</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:60px">หน่วย</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:100px">ราคา/หน่วย</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:80px">ส่วนลด</th>
+          <th style="background:white;color:#000;padding:8px 10px;font-size:12px;border:1px solid #000;font-weight:700;width:110px">รวม</th>
         </tr></thead>
         <tbody>${itemRows}</tbody>
       </table>
@@ -554,6 +557,7 @@ export default function Quotations() {
                         <th style={{ width: '50px' }}>#</th>
                         <th>รายละเอียด</th>
                         <th style={{ width: '90px' }}>จำนวน</th>
+                        <th style={{ width: '80px' }}>หน่วย</th>
                         <th style={{ width: '120px' }}>ราคา/หน่วย</th>
                         <th style={{ width: '100px' }}>ส่วนลด</th>
                         <th style={{ width: '120px' }} className="text-right">รวม</th>
@@ -566,6 +570,7 @@ export default function Quotations() {
                           <td className="text-center">{idx + 1}</td>
                           <td><input type="text" className="form-input" value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} placeholder="ชื่อสินค้า" style={{ border: 'none', padding: '4px 8px', background: 'transparent' }} /></td>
                           <td><input type="number" className="form-input" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', e.target.value)} min="1" style={{ textAlign: 'center', padding: '4px 8px' }} /></td>
+                          <td><input type="text" className="form-input" value={item.unit || ''} onChange={e => updateItem(item.id, 'unit', e.target.value)} placeholder="ชิ้น" style={{ textAlign: 'center', padding: '4px 8px', border: 'none', background: 'transparent' }} /></td>
                           <td><input type="number" className="form-input" value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', e.target.value)} min="0" step="0.01" style={{ textAlign: 'right', padding: '4px 8px' }} /></td>
                           <td><input type="number" className="form-input" value={item.discount} onChange={e => updateItem(item.id, 'discount', e.target.value)} min="0" style={{ textAlign: 'right', padding: '4px 8px' }} /></td>
                           <td className="text-right text-bold text-mono">{formatNumber(item.total)}</td>
