@@ -337,7 +337,7 @@ export default function InvoiceHistory() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:${signatureGap};margin-top:${compact ? '8px' : dotMatrix ? '12px' : '24px'}">
           <div style="text-align:center">
             <div style="border-bottom:1px dotted ${dotMatrix ? '#000' : '#94a3b8'};padding-bottom:${signaturePad};margin-bottom:${compact || dotMatrix ? '4px' : '8px'}"></div>
-            <div style="font-size:12px;color:${muted}">อนุมัติโดย</div>
+            <div style="font-size:12px;color:${muted}">ผู้รับสินค้า</div>
             <div style="font-size:11px;color:${muted};margin-top:4px">วันที่ ........./........./.........</div>
           </div>
           <div style="text-align:center">

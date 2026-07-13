@@ -1436,7 +1436,7 @@ function InvoicePrintLayout({ data, compact = false, dotMatrix = false }) {
       <div data-print-section="signatures" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: signatureGap, marginTop: signatureMargin }}>
         <div style={{ textAlign: 'center' }}>
           <div data-print-line="signature" style={{ borderBottom: `1px dotted ${dotMatrix ? '#000' : '#94a3b8'}`, paddingBottom: signaturePad, marginBottom: dotMatrix || compact ? '4px' : '8px' }}></div>
-          <div style={{ fontSize: '12px', color: muted }}>อนุมัติโดย</div>
+          <div style={{ fontSize: '12px', color: muted }}>ผู้รับสินค้า</div>
           <div style={{ fontSize: '11px', color: muted, marginTop: '4px' }}>วันที่ ........./........./.........</div>
         </div>
         <div style={{ textAlign: 'center' }}>
