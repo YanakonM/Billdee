@@ -5,7 +5,7 @@ import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import { db, getNextProductCode, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort } from '../utils/helpers';
-import { Plus, Search, Edit2, Trash2, Package, ScanBarcode, AlertTriangle, PackagePlus } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Package, ScanBarcode, AlertTriangle, PackagePlus, Coins } from 'lucide-react';
 
 // Thai labels + direction for the stock-movement history list.
 const LOG_LABELS = {
@@ -212,6 +212,11 @@ export default function Products() {
     }
   }
 
+  // Calculate inventory statistics
+  const totalProducts = products.length;
+  const totalStockQty = products.reduce((sum, p) => sum + (p.stock != null ? p.stock : 0), 0);
+  const totalStockValue = products.reduce((sum, p) => sum + (p.stock != null ? (p.price || 0) * p.stock : 0), 0);
+
   return (
     <>
       <Header
@@ -238,6 +243,48 @@ export default function Products() {
             />
           </div>
         )}
+
+        {/* Stats Grid */}
+        <div className="stats-grid">
+          <div className="stat-card stat-card--success">
+            <div className="stat-icon stat-icon--success">
+              <Coins size={24} />
+            </div>
+            <div className="stat-info">
+              <div className="stat-label">มูลค่าสินค้าในคลังรวม</div>
+              <div className="stat-value">฿{formatNumber(totalStockValue)}</div>
+              <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
+                เฉพาะสินค้าที่เปิดการติดตามสต็อก
+              </div>
+            </div>
+          </div>
+
+          <div className="stat-card stat-card--accent">
+            <div className="stat-icon stat-icon--accent">
+              <PackagePlus size={24} />
+            </div>
+            <div className="stat-info">
+              <div className="stat-label">จำนวนสินค้าคงเหลือรวม</div>
+              <div className="stat-value">{formatNumber(totalStockQty, 0)}</div>
+              <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
+                ชิ้น/หน่วยสินค้าในคลัง
+              </div>
+            </div>
+          </div>
+
+          <div className="stat-card stat-card--primary">
+            <div className="stat-icon stat-icon--primary">
+              <Package size={24} />
+            </div>
+            <div className="stat-info">
+              <div className="stat-label">รายการสินค้าทั้งหมด</div>
+              <div className="stat-value">{totalProducts}</div>
+              <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
+                รายการสินค้าในระบบทั้งหมด
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Search */}
         <div style={{ marginBottom: '20px' }}>
