@@ -33,8 +33,8 @@ npm run tauri:build
 
 ได้ไฟล์ติดตั้งที่:
 ```
-src-tauri\target\release\bundle\nsis\Billdee_0.1.15_x64-setup.exe   ← ตัวติดตั้ง (แนะนำ)
-src-tauri\target\release\bundle\msi\Billdee_0.1.15_x64_en-US.msi
+src-tauri\target\release\bundle\nsis\Billdee_0.1.16_x64-setup.exe   ← ตัวติดตั้ง (แนะนำ)
+src-tauri\target\release\bundle\msi\Billdee_0.1.16_x64_en-US.msi
 ```
 ดับเบิลคลิกติดตั้ง → ได้ไอคอน Billdee ใน Start menu เปิดเหมือนโปรแกรมทั่วไป
 

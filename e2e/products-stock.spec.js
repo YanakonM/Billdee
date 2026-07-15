@@ -20,6 +20,7 @@ test.describe('สินค้า & สต็อค', () => {
     await expect(row.locator('td').nth(4)).toContainText('320.00');
     await expect(row.locator('td').nth(5)).toContainText('450.00');
     await expect(page.getByText('฿1,280.00')).toBeVisible();
+    await expect(page.getByText('฿1,800.00')).toBeVisible();
   });
 
   test('รับสินค้าเข้าผ่าน modal สต็อค + ประวัติบันทึกครบ', async ({ page }) => {

@@ -225,6 +225,7 @@ export default function Products() {
   const totalProducts = products.length;
   const totalStockQty = products.reduce((sum, p) => sum + (p.stock != null ? p.stock : 0), 0);
   const totalStockValue = products.reduce((sum, p) => sum + (p.stock != null ? (p.costPrice || 0) * p.stock : 0), 0);
+  const totalSaleValue = products.reduce((sum, p) => sum + (p.stock != null ? (p.price || 0) * p.stock : 0), 0);
 
   return (
     <>
@@ -266,6 +267,19 @@ export default function Products() {
               <div className="stat-value">฿{formatNumber(totalStockValue)}</div>
               <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
                 คำนวณจากราคาทุนของสินค้าที่ติดตามสต็อก
+              </div>
+            </div>
+          </div>
+
+          <div className="stat-card stat-card--primary">
+            <div className="stat-icon stat-icon--primary">
+              <Coins size={24} />
+            </div>
+            <div className="stat-info">
+              <div className="stat-label">มูลค่าขายสินค้าในคลังรวม</div>
+              <div className="stat-value">฿{formatNumber(totalSaleValue)}</div>
+              <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
+                คำนวณจากราคาขายของสินค้าที่ติดตามสต็อก
               </div>
             </div>
           </div>
