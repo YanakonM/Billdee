@@ -41,7 +41,7 @@ export async function addProduct(page, { name, price, stock = '', barcode = '' }
 /** On the create-invoice page: add a free-text line item to the first empty row. */
 export async function fillManualItem(page, { description, qty = 1, price, discount }) {
   const row = page.locator('.data-table tbody tr').first();
-  await row.locator('input[type="text"]').fill(description);
+  await row.getByPlaceholder('ชื่อสินค้า / บริการ').fill(description);
   await row.locator('input[type="number"]').nth(0).fill(String(qty));
   await row.locator('input[type="number"]').nth(1).fill(String(price));
   if (discount !== undefined) await row.locator('input[type="number"]').nth(2).fill(String(discount));

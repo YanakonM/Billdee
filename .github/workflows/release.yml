@@ -29,7 +29,7 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build, sign & publish release
         uses: tauri-apps/tauri-action@v0
@@ -44,8 +44,9 @@ jobs:
             ติดตั้งจากไฟล์ด้านล่าง หรือกด "ตรวจหาอัปเดต" ในแอป Billdee เดิมเพื่ออัปเดตอัตโนมัติ
 
             ใหม่ในเวอร์ชันนี้:
-            - เพิ่มขนาดกระดาษต่อเนื่อง 9×11" สำหรับ Epson LQ-310
-            - ปรับโหมดหัวเข็ม 9×5.5" และ 9×11" ให้หัวตารางเป็นพื้นขาว ตัวอักษรดำ เส้นชัดขึ้น
-            - ลดพื้นหลัง/สีเทาและปรับหน้าพิมพ์เพื่อลดข้อความหัวท้ายหรือ URL ที่ติดมากับ browser print
+            - อัปเดต Vite เป็น 8.1.4 และล็อก dependency ให้ผ่าน audit
+            - แยก bundle และ lazy-load หน้าสแกนบาร์โค้ดเพื่อลดขนาดไฟล์เริ่มต้น
+            - เพิ่ม guard/index ของ SQLite สำหรับเลขเอกสารซ้ำใน invoice, quotation และ credit note
+            - เพิ่ม GitHub Actions CI สำหรับ audit, test, build, e2e และ cargo check
           releaseDraft: false
           prerelease: false

@@ -13,12 +13,34 @@ export function isTauri() {
 const COLS = {
   customers: ['name', 'code'],
   products: ['barcode', 'code'],
+  invoices: ['invoiceNumber'],
+  quotations: ['quotationNumber'],
+  creditNotes: ['noteNumber'],
 };
 
 const flat = (r) => ({ id: r.id, ...JSON.parse(r.data) });
 
 let _db = null;
 let _initPromise = null;
+
+async function ensureColumn(d, table, column) {
+  const cols = await d.select(`PRAGMA table_info(${table})`);
+  if (!cols.some(c => c.name === column)) {
+    await d.execute(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+  }
+}
+
+async function backfillIndexedColumns(d, table, cols) {
+  if (!cols.length) return;
+  const rows = await d.select(`SELECT id, data FROM ${table}`);
+  for (const row of rows) {
+    let obj;
+    try { obj = JSON.parse(row.data); } catch { continue; }
+    const sets = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+    const values = [...cols.map(c => obj?.[c] ?? null), row.id];
+    await d.execute(`UPDATE ${table} SET ${sets} WHERE id = $${values.length}`, values);
+  }
+}
 
 async function ensureDb() {
   if (_db) return _db;
@@ -28,11 +50,17 @@ async function ensureDb() {
       const d = await Database.load('sqlite:tex_v2.db');
       await d.execute('CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, name TEXT, code TEXT)');
       await d.execute('CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, barcode TEXT, code TEXT)');
-      await d.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
-      await d.execute('CREATE TABLE IF NOT EXISTS quotations (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
-      await d.execute('CREATE TABLE IF NOT EXISTS creditNotes (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
+      await d.execute('CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, invoiceNumber TEXT)');
+      await d.execute('CREATE TABLE IF NOT EXISTS quotations (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, quotationNumber TEXT)');
+      await d.execute('CREATE TABLE IF NOT EXISTS creditNotes (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, noteNumber TEXT)');
       await d.execute('CREATE TABLE IF NOT EXISTS stockLogs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)');
       await d.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
+      await ensureColumn(d, 'invoices', 'invoiceNumber');
+      await ensureColumn(d, 'quotations', 'quotationNumber');
+      await ensureColumn(d, 'creditNotes', 'noteNumber');
+      await backfillIndexedColumns(d, 'invoices', COLS.invoices);
+      await backfillIndexedColumns(d, 'quotations', COLS.quotations);
+      await backfillIndexedColumns(d, 'creditNotes', COLS.creditNotes);
       await d.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)');
       await d.execute('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
       // Match Dexie's `&code` unique index so the two storage modes behave the
@@ -40,6 +68,9 @@ async function ensureDb() {
       // must still open — the index is then skipped rather than bricking init.
       try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_code ON customers(code)'); } catch { /* duplicates exist — skip */ }
       try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code ON products(code)'); } catch { /* duplicates exist — skip */ }
+      try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_invoiceNumber ON invoices(invoiceNumber) WHERE invoiceNumber IS NOT NULL'); } catch { /* duplicates exist — skip */ }
+      try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_quotationNumber ON quotations(quotationNumber) WHERE quotationNumber IS NOT NULL'); } catch { /* duplicates exist — skip */ }
+      try { await d.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_creditNotes_noteNumber ON creditNotes(noteNumber) WHERE noteNumber IS NOT NULL'); } catch { /* duplicates exist — skip */ }
       _db = d;
       return d;
     })();

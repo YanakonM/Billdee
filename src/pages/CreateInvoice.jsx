@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Layout/Header';
-import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import Modal from '../components/Common/Modal';
 import { db, getNextInvoiceNumber, getNextCashBillNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
@@ -13,6 +12,8 @@ import {
   FilePlus, ScanBarcode, Plus, Trash2, Search, Save,
   Printer, FileDown, Eye, X, Camera, UserPlus, Share2
 } from 'lucide-react';
+
+const BarcodeScanner = lazy(() => import('../components/Scanner/BarcodeScanner'));
 
 export default function CreateInvoice() {
   const navigate = useNavigate();
@@ -851,10 +852,12 @@ export default function CreateInvoice() {
             <div className="card-body" style={{ padding: 0 }}>
               {showScanner && (
                 <div style={{ padding: '16px', borderBottom: '1px solid var(--color-gray-100)' }}>
-                  <BarcodeScanner
-                    onScan={handleBarcodeScan}
-                    onClose={() => setShowScanner(false)}
-                  />
+                  <Suspense fallback={<div style={{ padding: '16px' }}>กำลังโหลดสแกนเนอร์...</div>}>
+                    <BarcodeScanner
+                      onScan={handleBarcodeScan}
+                      onClose={() => setShowScanner(false)}
+                    />
+                  </Suspense>
                 </div>
               )}
 

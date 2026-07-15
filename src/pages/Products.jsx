@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
-import BarcodeScanner from '../components/Scanner/BarcodeScanner';
 import { db, getNextProductCode, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort } from '../utils/helpers';
@@ -17,6 +16,8 @@ const LOG_LABELS = {
   set: { label: 'ตั้งยอด', sign: '+' },
   init: { label: 'เริ่มติดตาม', sign: '=' },
 };
+
+const BarcodeScanner = lazy(() => import('../components/Scanner/BarcodeScanner'));
 
 export default function Products() {
   const { showToast, appConfirm } = useApp();
@@ -237,10 +238,12 @@ export default function Products() {
         {/* Barcode Scanner */}
         {showScanner && (
           <div style={{ marginBottom: '20px', maxWidth: '500px' }}>
-            <BarcodeScanner
-              onScan={handleBarcodeScan}
-              onClose={() => setShowScanner(false)}
-            />
+            <Suspense fallback={<div className="card" style={{ padding: '16px' }}>กำลังโหลดสแกนเนอร์...</div>}>
+              <BarcodeScanner
+                onScan={handleBarcodeScan}
+                onClose={() => setShowScanner(false)}
+              />
+            </Suspense>
           </div>
         )}
 
