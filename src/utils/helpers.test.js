@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   bahtText, formatNumber, isValidThaiTaxId, formatBranch,
-  escapeHtml, toLocalDateKey, setDateEra, formatDateShort,
+  escapeHtml, toLocalDateKey, setDateEra, formatDateShort, formatDateThai,
 } from './helpers.js';
 
 describe('bahtText — จำนวนเงินเป็นตัวหนังสือไทย', () => {
@@ -88,6 +88,19 @@ describe('formatDateShort + setDateEra — พ.ศ./ค.ศ. มีผลจร�
     setDateEra('th'); // restore for other tests
   });
 });
+
+describe('formatDateThai — ปรับวันที่เป็น ว/ด/ป แล้วเป็นพ.ศ.', () => {
+  it('ค่าเริ่มต้นเป็น พ.ศ. (ว/ด/ป)', () => {
+    setDateEra('th');
+    expect(formatDateThai('2026-07-02')).toBe('02/07/2569');
+  });
+  it('สลับเป็น ค.ศ. แล้วแสดงเป็น ค.ศ. (ว/ด/ป)', () => {
+    setDateEra('en');
+    expect(formatDateThai('2026-07-02')).toBe('02/07/2026');
+    setDateEra('th'); // restore for other tests
+  });
+});
+
 
 describe('formatNumber', () => {
   it('ค่า null/undefined/NaN → "0.00"', () => {

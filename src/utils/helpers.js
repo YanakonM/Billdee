@@ -123,18 +123,15 @@ function displayYear(d) {
   return _dateEra === 'th' ? d.getFullYear() + 543 : d.getFullYear();
 }
 
-// Format date to Thai long form (year follows the configured era)
+// Format date to Thai form (DD/MM/YYYY, year follows the configured era)
 export function formatDateThai(date) {
   if (!date) return '';
   const d = new Date(date);
-  const day = d.getDate();
-  const months = [
-    'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
-    'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'
-  ];
-  const month = months[d.getMonth()];
-  return `${day} ${month} ${displayYear(d)}`;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${displayYear(d)}`;
 }
+
 
 // Format date short
 export function formatDateShort(date) {
