@@ -29,7 +29,7 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [form, setForm] = useState({
     code: '', barcode: '', name: '', description: '',
-    price: '', unit: 'ชิ้น', category: '', stock: ''
+    costPrice: '', price: '', unit: 'ชิ้น', category: '', stock: ''
   });
 
   // Stock receive/adjust modal + movement history
@@ -125,7 +125,7 @@ export default function Products() {
   async function openAdd(prefill) {
     const extra = prefill && typeof prefill === 'object' && !('nativeEvent' in prefill) ? prefill : {};
     const code = await getNextProductCode();
-    setForm({ code, barcode: '', name: '', description: '', price: '', unit: 'ชิ้น', category: '', stock: '', ...extra });
+    setForm({ code, barcode: '', name: '', description: '', costPrice: '', price: '', unit: 'ชิ้น', category: '', stock: '', ...extra });
     setEditingProduct(null);
     setShowModal(true);
   }
@@ -136,6 +136,7 @@ export default function Products() {
       barcode: product.barcode || '',
       name: product.name || '',
       description: product.description || '',
+      costPrice: product.costPrice?.toString() || '',
       price: product.price?.toString() || '',
       unit: product.unit || 'ชิ้น',
       category: product.category || '',
@@ -151,8 +152,14 @@ export default function Products() {
       showToast('กรุณากรอกชื่อสินค้า', 'error');
       return;
     }
-    if (!form.price || isNaN(form.price)) {
-      showToast('กรุณากรอกราคาที่ถูกต้อง', 'error');
+    const salePrice = parseFloat(form.price);
+    const costPrice = String(form.costPrice).trim() === '' ? null : parseFloat(form.costPrice);
+    if (String(form.costPrice).trim() !== '' && (isNaN(costPrice) || costPrice < 0)) {
+      showToast('กรุณากรอกราคาทุนให้ถูกต้อง', 'error');
+      return;
+    }
+    if (!form.price || isNaN(salePrice) || salePrice < 0) {
+      showToast('กรุณากรอกราคาขายให้ถูกต้อง', 'error');
       return;
     }
     // Duplicate barcode = the scanner will always pick the other product.
@@ -169,7 +176,8 @@ export default function Products() {
       const data = {
         ...form,
         barcode: form.barcode.trim(),
-        price: parseFloat(form.price),
+        costPrice,
+        price: salePrice,
         // Blank = not tracked (null). "0" typed on purpose = tracked and out of stock.
         stock: String(form.stock).trim() === '' ? null : (parseInt(form.stock) || 0),
       };
@@ -216,7 +224,7 @@ export default function Products() {
   // Calculate inventory statistics
   const totalProducts = products.length;
   const totalStockQty = products.reduce((sum, p) => sum + (p.stock != null ? p.stock : 0), 0);
-  const totalStockValue = products.reduce((sum, p) => sum + (p.stock != null ? (p.price || 0) * p.stock : 0), 0);
+  const totalStockValue = products.reduce((sum, p) => sum + (p.stock != null ? (p.costPrice || 0) * p.stock : 0), 0);
 
   return (
     <>
@@ -254,10 +262,10 @@ export default function Products() {
               <Coins size={24} />
             </div>
             <div className="stat-info">
-              <div className="stat-label">มูลค่าสินค้าในคลังรวม</div>
+              <div className="stat-label">มูลค่าทุนสินค้าในคลังรวม</div>
               <div className="stat-value">฿{formatNumber(totalStockValue)}</div>
               <div className="stat-change text-muted" style={{ fontSize: '12px' }}>
-                เฉพาะสินค้าที่เปิดการติดตามสต็อก
+                คำนวณจากราคาทุนของสินค้าที่ติดตามสต็อก
               </div>
             </div>
           </div>
@@ -313,7 +321,8 @@ export default function Products() {
                   <th>บาร์โค้ด</th>
                   <th>ชื่อสินค้า</th>
                   <th>หมวดหมู่</th>
-                  <th className="text-right">ราคา</th>
+                  <th className="text-right">ราคาทุน</th>
+                  <th className="text-right">ราคาขาย</th>
                   <th>หน่วย</th>
                   <th className="text-center">คงเหลือ</th>
                   <th className="text-center">จัดการ</th>
@@ -332,6 +341,7 @@ export default function Products() {
                         <span className="badge badge-primary">{p.category}</span>
                       ) : '-'}
                     </td>
+                    <td className="text-right text-mono">{p.costPrice == null ? '-' : formatNumber(p.costPrice)}</td>
                     <td className="text-right text-mono text-bold">{formatNumber(p.price)}</td>
                     <td>{p.unit}</td>
                     <td className="text-center">
@@ -357,7 +367,7 @@ export default function Products() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan="8">
+                    <td colSpan="9">
                       <div className="empty-state">
                         <Package size={48} />
                         <p className="empty-state-title">ไม่พบสินค้า</p>
@@ -420,7 +430,13 @@ export default function Products() {
         </div>
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">ราคาต่อหน่วย <span className="required">*</span></label>
+            <label className="form-label">ราคาทุน</label>
+            <input type="number" className="form-input" value={form.costPrice}
+              onChange={(e) => setForm({ ...form, costPrice: e.target.value })}
+              placeholder="0.00" min="0" step="0.01" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">ราคาขาย <span className="required">*</span></label>
             <input type="number" className="form-input" value={form.price}
               onChange={(e) => setForm({ ...form, price: e.target.value })}
               placeholder="0.00" min="0" step="0.01" />

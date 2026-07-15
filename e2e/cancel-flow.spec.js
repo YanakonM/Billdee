@@ -20,7 +20,7 @@ test('ขายตัดสต็อค → ยกเลิกบิล → ส�
 
   // สต็อคเหลือ 8
   await goTo(page, '/products', 'จัดการสินค้า');
-  await expect(page.locator('.data-table tbody tr').first().locator('td').nth(6))
+  await expect(page.locator('.data-table tbody tr').first().locator('td').nth(7))
     .toContainText('8');
 
   // ยกเลิกบิล (ปุ่มยืนยันใน dialog ชื่อ "ยกเลิกเอกสาร" พอดี — ต้อง exact
@@ -37,6 +37,6 @@ test('ขายตัดสต็อค → ยกเลิกบิล → ส�
 
   // สต็อคกลับเป็น 10
   await goTo(page, '/products', 'จัดการสินค้า');
-  await expect(page.locator('.data-table tbody tr').first().locator('td').nth(6))
+  await expect(page.locator('.data-table tbody tr').first().locator('td').nth(7))
     .toContainText('10');
 });

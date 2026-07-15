@@ -21,7 +21,7 @@ export async function expectToast(page, text) {
 }
 
 /** Add a product via the Products modal. stock '' = not tracked. */
-export async function addProduct(page, { name, price, stock = '', barcode = '' }) {
+export async function addProduct(page, { name, price, costPrice = '', stock = '', barcode = '' }) {
   await page.getByRole('button', { name: 'เพิ่มสินค้า', exact: true }).click();
   const modal = page.locator('.modal');
   await expect(modal).toBeVisible();
@@ -29,8 +29,9 @@ export async function addProduct(page, { name, price, stock = '', barcode = '' }
   await expect(modal.locator('input[type="text"]').first()).toHaveValue(/^P-/);
   if (barcode) await modal.locator('input[type="text"]').nth(1).fill(barcode);
   await modal.locator('input[type="text"]').nth(2).fill(name);
-  await modal.locator('input[type="number"]').nth(0).fill(String(price));
-  if (stock !== '') await modal.locator('input[type="number"]').nth(1).fill(String(stock));
+  if (costPrice !== '') await modal.locator('input[type="number"]').nth(0).fill(String(costPrice));
+  await modal.locator('input[type="number"]').nth(1).fill(String(price));
+  if (stock !== '') await modal.locator('input[type="number"]').nth(2).fill(String(stock));
   await modal.getByRole('button', { name: 'เพิ่มสินค้า', exact: true }).click();
   // Success closes the modal and the new row appears (validation failures
   // keep the modal open — a much clearer failure signal than a missed toast).
@@ -50,5 +51,7 @@ export async function fillManualItem(page, { description, qty = 1, price, discou
 /** Pick a saved product into the bill via the product quick-search. */
 export async function pickProduct(page, query) {
   await page.locator('input[placeholder*="ค้นหาสินค้าที่บันทึกไว้"]').fill(query);
-  await page.locator('.autocomplete-item').first().click();
+  const option = page.locator('.autocomplete-item', { hasText: query }).first();
+  await expect(option).toBeVisible();
+  await option.click();
 }

@@ -7,8 +7,19 @@ test.describe('สินค้า & สต็อค', () => {
     await goTo(page, '/products', 'จัดการสินค้า');
     await addProduct(page, { name: 'บริการติดตั้ง', price: 500 }); // stock blank
     const row = page.locator('.data-table tbody tr').first();
-    await expect(row.locator('td').nth(6)).toHaveText('-');
+    await expect(row.locator('td').nth(7)).toHaveText('-');
     await expect(row.locator('.badge-danger')).toHaveCount(0);
+  });
+
+  test('แยกราคาทุนและราคาขายในคลังสินค้า', async ({ page }) => {
+    await openApp(page);
+    await goTo(page, '/products', 'จัดการสินค้า');
+    await addProduct(page, { name: 'สีทาผนัง', costPrice: 320, price: 450, stock: 4 });
+
+    const row = page.locator('.data-table tbody tr').first();
+    await expect(row.locator('td').nth(4)).toContainText('320.00');
+    await expect(row.locator('td').nth(5)).toContainText('450.00');
+    await expect(page.getByText('฿1,280.00')).toBeVisible();
   });
 
   test('รับสินค้าเข้าผ่าน modal สต็อค + ประวัติบันทึกครบ', async ({ page }) => {
