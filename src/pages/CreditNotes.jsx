@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
+import ThaiDateInput from '../components/Common/ThaiDateInput';
 import { db, getNextCreditNoteNumber, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort, formatDateThai, getToday, bahtText, escapeHtml } from '../utils/helpers';
@@ -291,7 +292,7 @@ export default function CreditNotes() {
           </div>
           <div className="form-group">
             <label className="form-label">วันที่</label>
-            <input type="date" className="form-input" value={noteDate} onChange={e => setNoteDate(e.target.value)} />
+            <ThaiDateInput value={noteDate} onChange={setNoteDate} aria-label="วันที่" />
           </div>
         </div>
 

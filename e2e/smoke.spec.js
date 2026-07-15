@@ -27,4 +27,15 @@ test.describe('Smoke — ทุกหน้าเปิดได้', () => {
     await goTo(page, '/settings', 'ตั้งค่า');
     await goTo(page, '/', 'แดชบอร์ด');
   });
+
+  test('ช่องวันที่แสดง วว/ดด/พ.ศ. และรับปี พ.ศ.', async ({ page }) => {
+    await openApp(page);
+    await goTo(page, '/create-invoice', 'สร้างใบเสร็จ');
+
+    const dateInput = page.getByLabel('วันที่').first();
+    await expect(dateInput).toHaveValue(/^\d{2}\/\d{2}\/25\d{2}$/);
+    await dateInput.fill('15/07/2569');
+    await dateInput.blur();
+    await expect(dateInput).toHaveValue('15/07/2569');
+  });
 });

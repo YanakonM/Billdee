@@ -430,6 +430,7 @@ export default function Products() {
             <select className="form-select" value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}>
               <option value="ชิ้น">ชิ้น</option>
+              <option value="โหล">โหล</option>
               <option value="กล่อง">กล่อง</option>
               <option value="ถุง">ถุง</option>
               <option value="แพ็ค">แพ็ค</option>

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   bahtText, formatNumber, isValidThaiTaxId, formatBranch,
   escapeHtml, toLocalDateKey, setDateEra, formatDateShort, formatDateThai,
+  formatDateInputThai, parseDateInputThai,
 } from './helpers.js';
 
 describe('bahtText — จำนวนเงินเป็นตัวหนังสือไทย', () => {
@@ -98,6 +99,28 @@ describe('formatDateThai — ปรับวันที่เป็น ว/ด/
     setDateEra('en');
     expect(formatDateThai('2026-07-02')).toBe('02/07/2026');
     setDateEra('th'); // restore for other tests
+  });
+});
+
+describe('Thai date input — แสดง พ.ศ. แต่เก็บ ISO', () => {
+  it('format เป็น วว/ดด/พ.ศ. เสมอ แม้ตั้งค่าการพิมพ์เป็น ค.ศ.', () => {
+    setDateEra('en');
+    expect(formatDateInputThai('2026-07-15')).toBe('15/07/2569');
+    setDateEra('th');
+  });
+
+  it.each([
+    ['15/07/2569', '2026-07-15'],
+    ['15/7/2026', '2026-07-15'],
+    ['๑๕/๐๗/๒๕๖๙', '2026-07-15'],
+    ['15072569', '2026-07-15'],
+    ['2026-07-15', '2026-07-15'],
+  ])('parse %s → %s', (input, expected) => {
+    expect(parseDateInputThai(input)).toBe(expected);
+  });
+
+  it('ไม่รับวันที่ที่ไม่มีจริง', () => {
+    expect(parseDateInputThai('31/02/2569')).toBe('');
   });
 });
 

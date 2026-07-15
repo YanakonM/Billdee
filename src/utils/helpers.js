@@ -119,27 +119,98 @@ export function setDateEra(era) {
   _dateEra = era === 'en' ? 'en' : 'th';
   try { localStorage.setItem('dateEra', _dateEra); } catch { /* ignore */ }
 }
-function displayYear(d) {
-  return _dateEra === 'th' ? d.getFullYear() + 543 : d.getFullYear();
+function displayYearValue(year) {
+  return _dateEra === 'th' ? year + 543 : year;
+}
+
+function readDateParts(date) {
+  if (!date) return null;
+  if (date instanceof Date) {
+    if (Number.isNaN(date.getTime())) return null;
+    return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() };
+  }
+
+  const text = String(date).trim();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = parseInt(iso[2], 10);
+    const day = parseInt(iso[3], 10);
+    return isValidDateParts(year, month, day) ? { year, month, day } : null;
+  }
+
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return null;
+  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+}
+
+function isValidDateParts(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1900 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(year, month - 1, day);
+  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+}
+
+function normalizeDateDigits(value) {
+  const thaiDigits = '๐๑๒๓๔๕๖๗๘๙';
+  return String(value ?? '').replace(/[๐-๙]/g, ch => String(thaiDigits.indexOf(ch))).trim();
 }
 
 // Format date to Thai form (DD/MM/YYYY, year follows the configured era)
 export function formatDateThai(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}/${month}/${displayYear(d)}`;
+  const parts = readDateParts(date);
+  if (!parts) return '';
+  const day = String(parts.day).padStart(2, '0');
+  const month = String(parts.month).padStart(2, '0');
+  return `${day}/${month}/${displayYearValue(parts.year)}`;
 }
 
 
 // Format date short
 export function formatDateShort(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}/${month}/${displayYear(d)}`;
+  const parts = readDateParts(date);
+  if (!parts) return '';
+  const day = String(parts.day).padStart(2, '0');
+  const month = String(parts.month).padStart(2, '0');
+  return `${day}/${month}/${displayYearValue(parts.year)}`;
+}
+
+// Date input display is always Thai Buddhist Era (พ.ศ.) while stored values stay ISO YYYY-MM-DD.
+export function formatDateInputThai(date) {
+  const parts = readDateParts(date);
+  if (!parts) return '';
+  return `${String(parts.day).padStart(2, '0')}/${String(parts.month).padStart(2, '0')}/${parts.year + 543}`;
+}
+
+export function parseDateInputThai(value) {
+  const text = normalizeDateDigits(value);
+  if (!text) return '';
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = parseInt(iso[2], 10);
+    const day = parseInt(iso[3], 10);
+    return isValidDateParts(year, month, day)
+      ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      : '';
+  }
+
+  let parts = text.split(/[\/\-. ]+/).filter(Boolean);
+  if (parts.length === 1 && /^\d{8}$/.test(parts[0])) {
+    parts = [parts[0].slice(0, 2), parts[0].slice(2, 4), parts[0].slice(4)];
+  }
+  if (parts.length !== 3) return '';
+  if (!parts.every(part => /^\d+$/.test(part))) return '';
+
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const inputYear = parseInt(parts[2], 10);
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(inputYear)) return '';
+
+  const year = inputYear >= 2400 ? inputYear - 543 : inputYear;
+  if (!isValidDateParts(year, month, day)) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 // Today's date as YYYY-MM-DD in LOCAL time. (toISOString converts to UTC —

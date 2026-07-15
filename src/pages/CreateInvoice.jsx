@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
+import ThaiDateInput from '../components/Common/ThaiDateInput';
 import { db, getNextInvoiceNumber, getNextCashBillNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId, escapeHtml } from '../utils/helpers';
@@ -88,7 +89,10 @@ export default function CreateInvoice() {
 
   useEffect(() => {
     loadSettings();
-  }, []);
+    // Re-run when the user clicks "สร้างใบเสร็จ" again while this page is
+    // already mounted, so a saved invoice does not keep the form in edit mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   // Any form change after a save re-enables the save button — the next save
   // updates the same document (editingId was set after the first save).
@@ -98,6 +102,36 @@ export default function CreateInvoice() {
   }, [items, customerSearch, customerPhone, selectedCustomer, invoiceDate, docType,
       paymentMethod, paymentStatus, paymentNote, cashReceived, notes, billDiscount,
       whtEnabled, whtRate, preparedBy]);
+
+  function resetInvoiceForm(nextNumber, lastPreparedName = '') {
+    setEditingId(null);
+    setInvoiceNumber(nextNumber);
+    setNumberEdited(false);
+    setInvoiceDate(getToday());
+    setDocType('receipt');
+    setWhtEnabled(false);
+    setWhtRate(3);
+    setCustomerSearch('');
+    setCustomerPhone('');
+    setCustomerSuggestions([]);
+    setSelectedCustomer(null);
+    setShowCustomerDropdown(false);
+    setItems([{ id: 1, description: '', quantity: 1, unitPrice: 0, discount: 0, total: 0 }]);
+    setShowScanner(false);
+    setProductSearch('');
+    setProductSuggestions([]);
+    setShowProductDropdown(false);
+    setShowPreview(false);
+    setPaymentMethod('cash');
+    setPaymentStatus('paid');
+    setPaymentNote('');
+    setCashReceived('');
+    setNotes('');
+    setBillDiscount('');
+    setPreparedBy(lastPreparedName);
+    setSaved(false);
+    setSaving(false);
+  }
 
   async function loadSettings() {
     const companySetting = await db.settings.get('company');
@@ -117,7 +151,6 @@ export default function CreateInvoice() {
     if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
 
     const nextNum = await getNextInvoiceNumber();
-    setInvoiceNumber(nextNum);
 
     // Editing an existing invoice — load its data over the blank form.
     if (editId) {
@@ -139,7 +172,7 @@ export default function CreateInvoice() {
           id: it.id ?? (Date.now() + idx),
           description: it.description || '', quantity: it.quantity || 1,
           unitPrice: it.unitPrice || 0, discount: it.discount || 0,
-          total: it.total || 0, productId: it.productId,
+          total: it.total || 0, productId: it.productId, unit: it.unit || '',
         })));
         setPaymentMethod(inv.paymentMethod || 'cash');
         setCashReceived(inv.cashReceived ? String(inv.cashReceived) : '');
@@ -151,6 +184,8 @@ export default function CreateInvoice() {
         setWhtEnabled(!!inv.whtEnabled);
         setWhtRate(inv.whtRate || 3);
       }
+    } else {
+      resetInvoiceForm(nextNum, lastPrepared?.value || '');
     }
   }
 
@@ -761,8 +796,7 @@ export default function CreateInvoice() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">วันที่</label>
-                  <input type="date" className="form-input" value={invoiceDate}
-                    onChange={e => setInvoiceDate(e.target.value)} />
+                  <ThaiDateInput value={invoiceDate} onChange={setInvoiceDate} aria-label="วันที่" />
                 </div>
               </div>
             </div>

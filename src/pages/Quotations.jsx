@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
+import ThaiDateInput from '../components/Common/ThaiDateInput';
 import { db, getNextQuotationNumber, reserveDocumentNumber, updateStock } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, escapeHtml } from '../utils/helpers';
@@ -463,11 +464,11 @@ export default function Quotations() {
                   </div>
                   <div className="form-group">
                     <label className="form-label">วันที่</label>
-                    <input type="date" className="form-input" value={quotationDate} onChange={e => setQuotationDate(e.target.value)} />
+                    <ThaiDateInput value={quotationDate} onChange={setQuotationDate} aria-label="วันที่" />
                   </div>
                   <div className="form-group">
                     <label className="form-label">ใช้ได้ถึง</label>
-                    <input type="date" className="form-input" value={validUntil} onChange={e => setValidUntil(e.target.value)} />
+                    <ThaiDateInput value={validUntil} onChange={setValidUntil} aria-label="ใช้ได้ถึง" />
                   </div>
                 </div>
               </div>
