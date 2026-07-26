@@ -1,0 +1,11 @@
+{
+  "version": "0.1.17",
+  "notes": "ค้นหาสินค้าเร็วและแม่นขึ้น (พิมพ์ตัวแรกก็ขึ้นผล, รหัส/บาร์โค้ดตรงเป๊ะมาก่อน, เลือกด้วย ↑↓ + Enter, แสดงจำนวนคงเหลือ) และเพิ่มปุ่ม \"นำออก / นำเข้า\" ในหน้าจัดการสินค้า — ย้ายเฉพาะข้อมูลสินค้า/สต็อคไปอีกเครื่องได้ทั้งไฟล์ JSON และ Excel/CSV โดยไม่ทับลูกค้าและใบเสร็จ นำเข้าซ้ำไม่เกิดรายการซ้ำ",
+  "pub_date": "2026-07-26T06:54:48Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSMEx3RWIvVDBEU25ZTDZWdlJpVk5jS1R2d2VvWm1NemVMQ1NnaXVUUWEzS2ZhYm13WEpSQ0lZMnR2TXZTUDV3R1N0VWQ0ZXhMaW4rdHRTM3dhbU5mL3pqSkFHa2sxckFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MDQ4NjMzCWZpbGU6QmlsbGRlZV8wLjEuMTdfeDY0LXNldHVwLmV4ZQozbG8ybDlKNUM3UnY4c1lkRCtNdEJQQWN3TWx1SXJwWWRRSVlOdk9kUlhNK0tSSHB6c01SS24wa2x5ZUsyZVJubnZjWTAvb1l2Uk5wZzFGNHpqb2FBQT09Cg==",
+      "url": "https://github.com/YanakonM/Billdee/releases/download/v0.1.17/Billdee_0.1.17_x64-setup.exe"
+    }
+  }
+}
