@@ -50,7 +50,7 @@ export async function fillManualItem(page, { description, qty = 1, price, discou
 
 /** Pick a saved product into the bill via the product quick-search. */
 export async function pickProduct(page, query) {
-  await page.locator('input[placeholder*="ค้นหาสินค้าที่บันทึกไว้"]').fill(query);
+  await page.locator('input[placeholder^="ค้นหาสินค้า"]').fill(query);
   const option = page.locator('.autocomplete-item', { hasText: query }).first();
   await expect(option).toBeVisible();
   await option.click();

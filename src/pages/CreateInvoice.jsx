@@ -6,6 +6,7 @@ import ThaiDateInput from '../components/Common/ThaiDateInput';
 import { db, getNextInvoiceNumber, getNextCashBillNumber, getNextCustomerCode, updateStock, reserveDocumentNumber } from '../db/database';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateThai, formatDateShort, getToday, bahtText, formatBranch, isValidThaiTaxId, escapeHtml } from '../utils/helpers';
+import { searchProducts } from '../utils/productSearch';
 import { generatePromptPayPayload } from '../utils/promptpay';
 import { PAPER_SIZE_OPTIONS, PRINT_ITEMS_PER_PAGE, getPaperConfig, isDotMatrixPaper, paginatePrintItems, printHtml } from '../utils/print';
 import { QRCodeSVG } from 'qrcode.react';
@@ -61,6 +62,13 @@ export default function CreateInvoice() {
   const [productSearch, setProductSearch] = useState('');
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  // Whole catalogue kept in memory so ranking a keystroke is instant. Reading
+  // the table on every keypress meant a disk/network round-trip per character
+  // on the SQLite and PocketBase stores.
+  const productCacheRef = useRef([]);
+  const productInputRef = useRef(null);
 
   // Preview
   const [showPreview, setShowPreview] = useState(false);
@@ -146,6 +154,9 @@ export default function CreateInvoice() {
 
     const stockSetting = await db.settings.get('stockSettings');
     if (stockSetting) setStockSettings(stockSetting.value);
+    if (stockSetting?.value?.lowStockThreshold != null) setLowStockThreshold(stockSetting.value.lowStockThreshold);
+
+    refreshProductCache();
 
     const printSetting = await db.settings.get('printSettings');
     if (printSetting?.value?.paperSize) setPaperSize(printSetting.value.paperSize);
@@ -261,21 +272,58 @@ export default function CreateInvoice() {
     setItems(items.filter(item => item.id !== id));
   }
 
-  // Product name auto-complete
-  async function handleProductSearch(value) {
+  // Pull the catalogue into memory. Cheap to re-run: it is one table read, and
+  // it keeps the picker honest after stock moved on another screen.
+  async function refreshProductCache() {
+    try {
+      productCacheRef.current = await db.products.toArray();
+      return productCacheRef.current;
+    } catch {
+      return productCacheRef.current;
+    }
+  }
+
+  function runProductSearch(value, list = productCacheRef.current) {
+    // Empty query still shows something (the latest products) so the list is
+    // useful the instant the box is focused.
+    const matches = searchProducts(list, value, { limit: 8 });
+    setProductSuggestions(matches);
+    setShowProductDropdown(matches.length > 0);
+    setActiveSuggestion(0);
+  }
+
+  // Product name auto-complete — synchronous against the cache, so results
+  // appear on the very first character with no request per keystroke.
+  function handleProductSearch(value) {
     setProductSearch(value);
-    if (value.trim().length >= 1) {
-      const all = await db.products.toArray();
-      const q = value.toLowerCase();
-      const matches = all.filter(p =>
-        p.name?.toLowerCase().includes(q) ||
-        p.barcode?.includes(value) ||
-        p.code?.toLowerCase().includes(q) ||
-        p.category?.toLowerCase().includes(q)
-      ).slice(0, 10);
-      setProductSuggestions(matches);
-      setShowProductDropdown(matches.length > 0);
-    } else {
+    runProductSearch(value);
+  }
+
+  // Opening the box refreshes the cache in the background; results are shown
+  // immediately from what we already have, then re-ranked when it lands.
+  function openProductSearch() {
+    runProductSearch(productSearch);
+    refreshProductCache().then(list => {
+      setProductSuggestions(searchProducts(list, productSearch, { limit: 8 }));
+    });
+  }
+
+  function handleProductKeyDown(e) {
+    if (!showProductDropdown || !productSuggestions.length) {
+      if (e.key === 'ArrowDown') openProductSearch();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestion(i => (i + 1) % productSuggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestion(i => (i - 1 + productSuggestions.length) % productSuggestions.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const picked = productSuggestions[activeSuggestion] || productSuggestions[0];
+      if (picked) selectProduct(picked);
+    } else if (e.key === 'Escape') {
       setShowProductDropdown(false);
     }
   }
@@ -317,6 +365,10 @@ export default function CreateInvoice() {
     addProductAsItem(product);
     setProductSearch('');
     setShowProductDropdown(false);
+    setActiveSuggestion(0);
+    // Keep the caret in the box so several products can be added in a row
+    // without reaching for the mouse.
+    productInputRef.current?.focus();
   }
 
   // Barcode scan
@@ -901,26 +953,55 @@ export default function CreateInvoice() {
                   <div className="search-wrapper">
                     <Search size={18} />
                     <input
+                      ref={productInputRef}
                       type="text"
                       className="search-input"
                       value={productSearch}
                       onChange={e => handleProductSearch(e.target.value)}
-                      onFocus={() => productSearch && handleProductSearch(productSearch)}
+                      onFocus={openProductSearch}
+                      onKeyDown={handleProductKeyDown}
                       onBlur={() => setTimeout(() => setShowProductDropdown(false), 200)}
-                      placeholder="ค้นหาสินค้าที่บันทึกไว้ (พิมพ์ชื่อ / บาร์โค้ด / รหัส) แล้วกดเลือก..."
+                      placeholder="ค้นหาสินค้า (ชื่อ / บาร์โค้ด / รหัส / หมวดหมู่) — ↑↓ เลือก, Enter เพิ่ม"
                     />
                   </div>
                   {showProductDropdown && (
                     <div className="autocomplete-dropdown">
-                      {productSuggestions.map(p => (
-                        <div key={p.id} className="autocomplete-item" onMouseDown={() => selectProduct(p)}>
-                          <div className="autocomplete-item-name">{p.name}</div>
-                          <div className="autocomplete-item-detail">
-                            {p.code && `${p.code} · `}฿{formatNumber(p.price || 0)}
-                            {p.stock != null && ` · คงเหลือ ${p.stock}${p.unit ? ` ${p.unit}` : ''}`}
-                          </div>
+                      {!productSearch.trim() && (
+                        <div style={{
+                          padding: '6px 14px', fontSize: '11px', fontWeight: 700,
+                          color: 'var(--color-gray-400)', background: 'var(--color-gray-50)'
+                        }}>
+                          สินค้าล่าสุด — พิมพ์เพื่อค้นหา
                         </div>
-                      ))}
+                      )}
+                      {productSuggestions.map((p, i) => {
+                        const out = p.stock != null && p.stock <= 0;
+                        const low = p.stock != null && p.stock > 0 && p.stock <= lowStockThreshold;
+                        return (
+                          <div
+                            key={p.id}
+                            className="autocomplete-item"
+                            onMouseEnter={() => setActiveSuggestion(i)}
+                            onMouseDown={() => selectProduct(p)}
+                            style={i === activeSuggestion ? { background: 'var(--color-primary-50)' } : undefined}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div className="autocomplete-item-name" style={{ flex: 1 }}>{p.name}</div>
+                              {p.stock != null && (
+                                <span className={`badge ${out ? 'badge-danger' : low ? 'badge-warning' : 'badge-success'}`}>
+                                  {out ? 'สต็อคหมด' : `คงเหลือ ${formatNumber(p.stock, 0)}${p.unit ? ` ${p.unit}` : ''}`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="autocomplete-item-detail">
+                              {p.code && `${p.code} · `}
+                              {p.barcode && `${p.barcode} · `}
+                              ฿{formatNumber(p.price || 0)}
+                              {p.category && ` · ${p.category}`}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

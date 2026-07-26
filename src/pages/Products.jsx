@@ -1,10 +1,12 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Header from '../components/Layout/Header';
 import Modal from '../components/Common/Modal';
 import { db, getNextProductCode, updateStock } from '../db/database';
+import { exportStockJson, exportStockCsv, parseStockFile, importStock } from '../db/stockTransfer';
 import { useApp } from '../context/AppContext';
 import { formatNumber, formatDateShort } from '../utils/helpers';
-import { Plus, Search, Edit2, Trash2, Package, ScanBarcode, AlertTriangle, PackagePlus, Coins } from 'lucide-react';
+import { filterProducts } from '../utils/productSearch';
+import { Plus, Search, Edit2, Trash2, Package, ScanBarcode, AlertTriangle, PackagePlus, Coins, ArrowLeftRight, Download, Upload, FileJson, FileSpreadsheet } from 'lucide-react';
 
 // Thai labels + direction for the stock-movement history list.
 const LOG_LABELS = {
@@ -38,6 +40,15 @@ export default function Products() {
   const [stockForm, setStockForm] = useState({ mode: 'receive', qty: '', note: '' });
   const [initialStock, setInitialStock] = useState('');
   const [trackStock, setTrackStock] = useState(true);
+
+  // Move the catalogue between machines (นำออก/นำเข้า สต็อค)
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [importPreview, setImportPreview] = useState(null); // { parsed, fileName }
+  const [importMode, setImportMode] = useState('merge');
+  const [importStockLevels, setImportStockLevels] = useState(true);
+  const [importLogs, setImportLogs] = useState(true);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const importInputRef = useRef(null);
 
   useEffect(() => { loadProducts(); }, []);
 
@@ -108,14 +119,9 @@ export default function Products() {
     openStock(await db.products.get(stockProduct.id));
   }
 
-  const filtered = products.filter(p => {
-    const q = search.toLowerCase();
-    return !q ||
-      p.name?.toLowerCase().includes(q) ||
-      p.barcode?.includes(q) ||
-      p.code?.toLowerCase().includes(q) ||
-      p.category?.toLowerCase().includes(q);
-  });
+  // Ranked search (exact รหัส/บาร์โค้ด beats a loose name substring) shared
+  // with the invoice item picker.
+  const filtered = filterProducts(products, search);
 
   // `prefill` lets the barcode-scan flow open the modal with the scanned code
   // already filled in (previously openAdd reset the form and lost it).
@@ -221,6 +227,68 @@ export default function Products() {
     }
   }
 
+  // ── นำออก / นำเข้า สต็อค (move the catalogue to another machine) ──────────
+
+  function closeTransfer() {
+    setShowTransfer(false);
+    setImportPreview(null);
+    if (importInputRef.current) importInputRef.current.value = '';
+  }
+
+  async function handleExport(kind) {
+    setTransferBusy(true);
+    try {
+      const count = kind === 'csv' ? await exportStockCsv() : await exportStockJson({ includeLogs: true });
+      showToast(`ส่งออก ${count} รายการเป็นไฟล์ ${kind === 'csv' ? 'Excel/CSV' : 'JSON'} แล้ว`);
+    } catch (err) {
+      showToast('ส่งออกไม่สำเร็จ: ' + err.message, 'error');
+    }
+    setTransferBusy(false);
+  }
+
+  // Parse only — nothing is written until the user confirms, so a bad file can
+  // never leave the catalogue half-imported.
+  async function handlePickImportFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = await parseStockFile(file);
+      setImportPreview({ parsed, fileName: file.name });
+    } catch (err) {
+      setImportPreview(null);
+      showToast(err.message, 'error');
+      event.target.value = '';
+    }
+  }
+
+  async function handleRunImport() {
+    if (!importPreview) return;
+    const { parsed } = importPreview;
+    if (importMode === 'replace' && !await appConfirm(
+      `จะลบสินค้าทั้งหมด ${products.length} รายการในเครื่องนี้ (รวมประวัติสต็อค) แล้วแทนที่ด้วย ${parsed.products.length} รายการจากไฟล์\nต้องการดำเนินการต่อหรือไม่?`,
+      { danger: true, okLabel: 'ล้างแล้วนำเข้า' })) return;
+
+    setTransferBusy(true);
+    try {
+      const result = await importStock(parsed, {
+        mode: importMode,
+        updateStockLevels: importStockLevels,
+        includeLogs: importLogs,
+      });
+      const parts = [`เพิ่ม ${result.added}`, `อัปเดต ${result.updated}`];
+      if (result.skipped) parts.push(`ข้าม ${result.skipped}`);
+      showToast(`นำเข้าสำเร็จ — ${parts.join(' · ')} รายการ`);
+      if (result.errors.length) {
+        showToast(`มี ${result.errors.length} รายการที่นำเข้าไม่ได้: ${result.errors[0]}`, 'warning');
+      }
+      await loadProducts();
+      closeTransfer();
+    } catch (err) {
+      showToast('นำเข้าไม่สำเร็จ: ' + err.message, 'error');
+    }
+    setTransferBusy(false);
+  }
+
   // Calculate inventory statistics
   const totalProducts = products.length;
   const totalStockQty = products.reduce((sum, p) => sum + (p.stock != null ? p.stock : 0), 0);
@@ -234,6 +302,9 @@ export default function Products() {
         subtitle={`ทั้งหมด ${products.length} รายการ`}
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-outline" onClick={() => setShowTransfer(true)}>
+              <ArrowLeftRight size={18} /> นำออก / นำเข้า
+            </button>
             <button className="btn btn-outline" onClick={() => setShowScanner(!showScanner)}>
               <ScanBarcode size={18} /> สแกนบาร์โค้ด
             </button>
@@ -312,17 +383,22 @@ export default function Products() {
         </div>
 
         {/* Search */}
-        <div style={{ marginBottom: '20px' }}>
-          <div className="search-wrapper" style={{ maxWidth: '400px' }}>
+        <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="search-wrapper" style={{ maxWidth: '400px', flex: 1 }}>
             <Search size={18} />
             <input
               type="text"
               className="search-input"
-              placeholder="ค้นหาชื่อสินค้า, บาร์โค้ด, หมวดหมู่..."
+              placeholder="ค้นหา ชื่อสินค้า / บาร์โค้ด / รหัส / หมวดหมู่..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {search && (
+            <span style={{ fontSize: '13px', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>
+              พบ {filtered.length} รายการ
+            </span>
+          )}
         </div>
 
         {/* Table */}
@@ -590,6 +666,97 @@ export default function Products() {
             )}
           </>
         )}
+      </Modal>
+
+      {/* นำออก / นำเข้า สต็อค — copy the catalogue to another machine */}
+      <Modal
+        isOpen={showTransfer}
+        onClose={closeTransfer}
+        title="นำออก / นำเข้า ข้อมูลสินค้า"
+        size="lg"
+        footer={<button className="btn btn-outline" onClick={closeTransfer}>ปิด</button>}
+      >
+        <h4 style={{ margin: '0 0 4px', fontWeight: 700, fontSize: '14px' }}>
+          <Download size={15} style={{ verticalAlign: '-2px' }} /> นำออก (จากเครื่องนี้)
+        </h4>
+        <p className="form-help" style={{ marginTop: 0 }}>
+          ส่งออกเฉพาะข้อมูลสินค้า/สต็อค — ไม่รวมลูกค้าและใบเสร็จ จึงนำไปใส่อีกเครื่องได้โดยไม่ทับข้อมูลอื่น
+        </p>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
+          <button className="btn btn-primary" disabled={transferBusy} onClick={() => handleExport('json')}>
+            <FileJson size={16} /> ไฟล์ JSON (ครบทุกอย่าง + ประวัติ)
+          </button>
+          <button className="btn btn-outline" disabled={transferBusy} onClick={() => handleExport('csv')}>
+            <FileSpreadsheet size={16} /> ไฟล์ Excel / CSV
+          </button>
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--color-gray-100)', paddingTop: '16px' }}>
+          <h4 style={{ margin: '0 0 4px', fontWeight: 700, fontSize: '14px' }}>
+            <Upload size={15} style={{ verticalAlign: '-2px' }} /> นำเข้า (มาที่เครื่องนี้)
+          </h4>
+          <p className="form-help" style={{ marginTop: 0 }}>
+            รับได้ทั้งไฟล์ JSON และ Excel/CSV — ระบบจับคู่สินค้าเดิมด้วยบาร์โค้ด → รหัส → ชื่อ จึงนำเข้าไฟล์เดิมซ้ำได้โดยไม่เกิดรายการซ้ำ
+          </p>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,.csv"
+            className="form-input"
+            onChange={handlePickImportFile}
+            style={{ marginBottom: '12px' }}
+          />
+
+          {importPreview && (
+            <>
+              <div style={{
+                padding: '12px 16px', background: 'var(--color-gray-50)',
+                borderRadius: 'var(--radius-md)', marginBottom: '16px', fontSize: '13px'
+              }}>
+                📄 <strong>{importPreview.fileName}</strong> — พบสินค้า{' '}
+                <strong>{importPreview.parsed.products.length}</strong> รายการ
+                {importPreview.parsed.stockLogs?.length > 0 &&
+                  ` · ประวัติสต็อค ${importPreview.parsed.stockLogs.length} รายการ`}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">วิธีนำเข้า</label>
+                <select className="form-select" value={importMode} onChange={e => setImportMode(e.target.value)}>
+                  <option value="merge">🔀 รวมกับของเดิม — มีอยู่แล้วให้อัปเดต, ไม่มีให้เพิ่มใหม่ (แนะนำ)</option>
+                  <option value="replace">🗑️ ล้างของเดิมทั้งหมด แล้วแทนที่ด้วยไฟล์นี้</option>
+                </select>
+              </div>
+
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px', marginBottom: '8px' }}>
+                <input type="checkbox" checked={importStockLevels}
+                  onChange={e => setImportStockLevels(e.target.checked)} />
+                อัปเดตจำนวนคงเหลือตามไฟล์ (ไม่ติ๊ก = นำเข้าเฉพาะรายชื่อ/ราคา คงจำนวนเดิมไว้)
+              </label>
+
+              {importMode === 'replace' && importPreview.parsed.stockLogs?.length > 0 && (
+                <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px', marginBottom: '8px' }}>
+                  <input type="checkbox" checked={importLogs}
+                    onChange={e => setImportLogs(e.target.checked)} />
+                  นำประวัติการเคลื่อนไหวสต็อคมาด้วย
+                </label>
+              )}
+
+              {importMode === 'replace' && (
+                <div style={{
+                  padding: '12px 16px', background: 'var(--color-warning-50)',
+                  borderRadius: 'var(--radius-md)', margin: '8px 0 16px', fontSize: '13px'
+                }}>
+                  <AlertTriangle size={14} style={{ verticalAlign: '-2px' }} /> สินค้าเดิม {products.length} รายการในเครื่องนี้จะถูกลบทิ้ง
+                  — ใบเสร็จเก่าที่อ้างถึงสินค้าเหล่านั้นจะไม่พบสินค้าต้นทาง แนะนำให้กด "นำออก JSON" เก็บไว้ก่อน
+                </div>
+              )}
+
+              <button className="btn btn-primary" disabled={transferBusy} onClick={handleRunImport}>
+                <Upload size={16} /> {transferBusy ? 'กำลังนำเข้า...' : 'เริ่มนำเข้า'}
+              </button>
+            </>
+          )}
+        </div>
       </Modal>
     </>
   );
